@@ -6,7 +6,7 @@
 const CONFIG = {
   // Paste the URL you get after deploying the Apps Script as a Web App.
   // It will look like: https://script.google.com/macros/s/AKfycb.../exec
-  APPS_SCRIPT_URL: "PASTE_APPS_SCRIPT_URL_HERE",
+  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycby0FDcwHB7LoKkEqs1MaOE2JD7WDHg5nsArNaB6ZLxOWmn3IXLqrQiXtcvQuoI9eSVI/exec",
 
   // Brochure links — one per enquiry type. These are sent inside the
   // WhatsApp message so the customer can tap through to see products.
