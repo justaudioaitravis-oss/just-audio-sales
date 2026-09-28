@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Just Audio — Field Sales</title>
+<meta name="theme-color" content="#FAF8F4">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Full-screen prompt shown once, the very first time the app is opened -->
+<div id="rep-prompt" class="hidden">
+  <h1>Your name?</h1>
+  <input id="rep-name-input" type="text" placeholder="e.g. Rohan" autocomplete="off">
+  <button id="rep-save-btn">Save</button>
+</div>
+
+<main id="app" class="hidden">
+
+  <!-- ========== TAB 1: FOLLOW-UPS ========== -->
+  <section id="tab-followups" class="tab active">
+    <div class="screen-header">
+      <h1>Follow-ups</h1>
+      <span id="queue-badge" class="queue-badge hidden"></span>
+    </div>
+    <ul id="followups-list"></ul>
+    <div id="followups-empty" class="empty-state hidden">Nothing due today.</div>
+    <div id="done-section" class="hidden">
+      <div id="done-heading">Done today</div>
+      <ul id="followups-done"></ul>
+    </div>
+  </section>
+
+  <!-- ========== TAB 2: NEW ENTRY ========== -->
+  <section id="tab-new" class="tab">
+    <div class="screen-header">
+      <h1>New entry</h1>
+    </div>
+
+    <form id="new-form">
+
+      <div class="field-group">
+        <span class="field-label">Phone</span>
+        <div class="phone-row" id="phone-row">
+          <span class="phone-prefix">+91</span>
+          <input id="phone-input" type="tel" inputmode="numeric" placeholder="98765 43210" autocomplete="off">
+        </div>
+        <div id="phone-error" class="inline-error"></div>
+        <div id="dupe-line" class="dupe-line hidden"></div>
+      </div>
+
+      <div class="two-up">
+        <div class="field-group">
+          <span class="field-label">Contact name</span>
+          <input id="contact-name-input" class="underline-input" type="text" autocomplete="off">
+        </div>
+        <div class="field-group">
+          <span class="field-label">Venue name</span>
+          <input id="venue-input" class="underline-input" type="text" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="field-group">
+        <span class="field-label">Enquiry</span>
+        <div class="chip-row" id="enquiry-chips">
+          <button type="button" class="chip" data-value="sales">Sales</button>
+          <button type="button" class="chip" data-value="service">Service</button>
+          <button type="button" class="chip" data-value="acoustics">Acoustics</button>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <span class="field-label">Nudge again in</span>
+        <div class="chip-row" id="nudge-chips">
+          <button type="button" class="chip" data-value="tomorrow">Tomorrow</button>
+          <button type="button" class="chip" data-value="3 days">3 days</button>
+          <button type="button" class="chip" data-value="1 week">1 week</button>
+          <button type="button" class="chip" data-value="1 month">1 month</button>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <span class="field-label">Photos</span>
+        <div class="photo-row" id="photo-row">
+          <!-- 5 slots injected by app.js -->
+        </div>
+      </div>
+
+      <div class="field-group">
+        <input id="note-input" class="underline-input" type="text" placeholder="Note — zones, music, deadline" autocomplete="off">
+      </div>
+
+      <button type="submit" id="submit-btn">Send to +91 98765 43210</button>
+
+    </form>
+  </section>
+
+</main>
+
+<nav class="bottom-nav hidden" id="bottom-nav">
+  <button class="nav-btn active" id="nav-followups" data-tab="tab-followups">Follow-ups</button>
+  <button class="nav-btn" id="nav-new" data-tab="tab-new">New</button>
+</nav>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
