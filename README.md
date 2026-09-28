@@ -187,7 +187,10 @@ When anything in the app changes, do these in this order:
    edit (pencil) → Version: **New version** → Deploy. The URL doesn't
    change, so `config.js` doesn't need touching.
 2. **Then the app files** — upload the changed files to GitHub as usual.
-3. **Bump the version in `sw.js`** whenever any app file changes (including
-   `config.js`): change `just-audio-shell-v2` to `v3`, and so on. Phones only
-   pick up new files when this number changes. They switch to the new
-   version the second time the app is opened after the upload.
+3. **That's it.** Phones pick up changes by themselves — there's no version
+   number to change. Each time the app is opened, it quietly checks GitHub
+   for changed files and downloads them in the background; the **next** time
+   it's opened, it's running the new version. (It only switches once every
+   file has fully downloaded, so a bad connection can't leave a phone
+   half-updated.) GitHub can take a few minutes to publish an upload, so if
+   you're checking a change, give it five minutes, then open the app twice.

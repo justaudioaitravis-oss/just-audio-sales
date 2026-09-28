@@ -925,7 +925,12 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("sw.js").catch(() => {});
+      // update() asks the browser to check for a new sw.js right away,
+      // rather than whenever it gets round to it (some phones are slow to).
+      // Changes to the other app files are picked up by sw.js itself.
+      navigator.serviceWorker.register("sw.js")
+        .then((registration) => registration.update())
+        .catch(() => {});
     });
   }
 

@@ -9,7 +9,7 @@ Build a lightweight Progressive Web App for field sales lead capture. I am not a
 > - **Google Sheet:** tab named `Leads`, columns match the APPS SCRIPT section below
 > - **Apps Script:** deployed as a Web App, URL pasted into `config.js` → `APPS_SCRIPT_URL`. To ship a script change, edit `apps-script.gs`, paste into the Apps Script editor, then Deploy → Manage deployments → edit → **New version** → Deploy (the live URL does not change, so `config.js` never needs re-editing for a script-only change)
 > - Installed to home screen on the owner's phone, behind a passcode screen (see below)
-> - **Shipping any app change:** deploy Apps Script first (if changed), then upload files, and bump `CACHE_NAME` in `sw.js` — phones never pick up changed files otherwise
+> - **Shipping any app change:** deploy Apps Script first (if changed), then upload files. No version bump needed — phones pick up changed files automatically (see OFFLINE)
 
 **Stack constraints (strict):** Plain HTML, CSS and vanilla JavaScript. No React, no Vue, no Tailwind, no npm packages, no build step, no bundler. Total payload under 50KB excluding photos. It must open in under one second on a mid-range Android phone on weak wifi.
 
@@ -140,6 +140,8 @@ If the number is in the Sheet but not on this phone (logged by another rep/phone
 **OFFLINE**
 
 Register a service worker that caches the app shell with a cache-first strategy, so the app opens instantly and works with no signal.
+
+Updates are automatic — there is no cache version to bump. On every app open (navigation), the service worker serves the saved copy immediately, then in the background re-downloads all shell files (`cache: "no-cache"`, so unchanged files are cheap 304s) and compares them byte-for-byte with the saved copy. If anything differs, the complete set is saved as a new cache (`just-audio-shell-<timestamp>`) and only then are older caches deleted — never a half-updated mix; any failed download keeps the old copy. The new version runs from the next open. `app.js` also calls `registration.update()` on load so changes to `sw.js` itself are picked up promptly.
 
 Every submit is saved to an offline queue on the phone **first**, then sent — never sent-then-saved-on-failure. The queue lives in **IndexedDB**, not localStorage: localStorage caps at ~5MB, which two photo-heavy visits fill, silently losing leads (this was a real bug in the first build, caught by stress testing).
 
