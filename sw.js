@@ -3,7 +3,9 @@
 // works with no signal. Strategy: cache-first for everything in the shell.
 // ============================================================================
 
-const CACHE_NAME = "just-audio-shell-v1";
+// IMPORTANT: change this version number every time any app file changes
+// (including config.js). Phones only pick up new files when this changes.
+const CACHE_NAME = "just-audio-shell-v2";
 const SHELL_FILES = [
   "./",
   "index.html",
@@ -17,7 +19,11 @@ const SHELL_FILES = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_FILES))
+    // cache: "reload" skips the browser's own short-term cache, so a new
+    // version always stores fresh copies of the files, never stale ones.
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.addAll(SHELL_FILES.map((f) => new Request(f, { cache: "reload" })))
+    )
   );
   self.skipWaiting();
 });

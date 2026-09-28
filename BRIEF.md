@@ -9,6 +9,7 @@ Build a lightweight Progressive Web App for field sales lead capture. I am not a
 > - **Google Sheet:** tab named `Leads`, columns match the APPS SCRIPT section below
 > - **Apps Script:** deployed as a Web App, URL pasted into `config.js` → `APPS_SCRIPT_URL`. To ship a script change, edit `apps-script.gs`, paste into the Apps Script editor, then Deploy → Manage deployments → edit → **New version** → Deploy (the live URL does not change, so `config.js` never needs re-editing for a script-only change)
 > - Installed to home screen on the owner's phone, behind a passcode screen (see below)
+> - **Shipping any app change:** deploy Apps Script first (if changed), then upload files, and bump `CACHE_NAME` in `sw.js` — phones never pick up changed files otherwise
 
 **Stack constraints (strict):** Plain HTML, CSS and vanilla JavaScript. No React, no Vue, no Tailwind, no npm packages, no build step, no bundler. Total payload under 50KB excluding photos. It must open in under one second on a mid-range Android phone on weak wifi.
 
@@ -138,7 +139,11 @@ Pre-fill name and venue from the record. On submit, update that lead's row rathe
 
 Register a service worker that caches the app shell with a cache-first strategy, so the app opens instantly and works with no signal.
 
-If a submit POST fails, queue the full payload in localStorage. Retry automatically on next app load and on `window.online`. While anything is queued, show a small badge on the Follow-ups tab: "2 waiting". Clear it when the queue drains.
+Every submit is saved to an offline queue on the phone **first**, then sent — never sent-then-saved-on-failure. The queue lives in **IndexedDB**, not localStorage: localStorage caps at ~5MB, which two photo-heavy visits fill, silently losing leads (this was a real bug in the first build, caught by stress testing).
+
+Each visit is queued as small separate uploads: one `kind: "lead"` item (the Sheet row), then one `kind: "photo"` item per photo, each with a fixed `photo_id`. Items go one at a time, oldest first, and are deleted only after the Apps Script replies `{ok: true}`. No signal / timeout / Google error page → stop and retry later. `{ok: false}` → keep it, carry on with the rest, retry that item after 10 minutes or on next app open. Only one retry runs at a time (plus `navigator.locks` across tabs). Before any photo is sent, the app checks the Apps Script reports `v >= 2` (`GET ?v=1`), so an out-of-date deployment can never receive a photo it would misread as a lead.
+
+Retries run on app load, on `window.online`, when the app comes back to the foreground (e.g. returning from WhatsApp), and every minute while open. Anything left in the old localStorage queue (`ja_queue`) from the first build is moved to IndexedDB on load. While anything is queued, the Follow-ups tab shows a badge counting visits with something still to send: "2 waiting". Clears when the queue drains.
 
 The queue must survive the app being closed. Test this path carefully — it is the most likely thing to be silently broken.
 
@@ -204,7 +209,8 @@ All nine templates should read warm, plain Indian English, no exclamation marks,
 
 The complete Google Apps Script lives in `apps-script.gs`:
 
-- `doPost` — append a new row, or update the existing row when `lead_id` is supplied
+- `doPost` — append a new row, or update the existing row when `lead_id` is supplied. Accepts `kind: "lead"` (row only), `kind: "photo"` (one photo; skipped if its `photo_id` was already saved; links the venue folder into the row), and the first build's single all-in-one payload (row + `photos` list). Runs under a script lock. Always returns `{ok: true, v: 2}` or `{ok: false, error}`
+- `doGet ?v=1` — returns `{ok: true, v: 2}` (API version check)
 - `doGet` — look up by phone, return the matching row as JSON, or `{found: false}`
 - Photo handling — decode base64, save into a Drive folder named after the venue (inside one root folder, `Just Audio - Lead Photos`), with a subfolder per room (`Room 1`, `Room 2`, ...), each photo filed under its label as the filename (e.g. `Front wall.jpg`); write the venue folder's URL into the row
 - CORS handled correctly for GitHub Pages

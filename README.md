@@ -128,11 +128,20 @@ The app is built to never lose a submission, even with no signal — but here's
 how to check:
 
 1. **Check the phone first.** Open the app. If the Follow-ups tab shows a
-   small badge like "2 waiting", that means submissions are saved on the
-   phone and are waiting for a signal to send. They will send automatically
-   next time the app is opened with internet, or as soon as the phone
-   reconnects. Nothing is lost — just be patient, or move somewhere with
-   better signal and reopen the app.
+   small badge like "2 waiting", that means 2 visits still have something
+   (the row, or some of their photos) saved on the phone, waiting to send.
+   They send automatically: when the app opens, when you come back to it
+   from WhatsApp, when signal returns, and every minute while it's open.
+   Nothing is lost — just be patient, or move somewhere with better signal
+   and reopen the app.
+
+   Each visit is sent in small pieces — the Sheet row first, then one photo
+   at a time — so on bad signal the row usually appears within seconds and
+   the photos follow.
+
+   If the badge **never** clears even with good signal, the Apps Script
+   probably refused something (see point 5 below). The app keeps it safe
+   and tries again every 10 minutes, and every time the app is reopened.
 
 2. **Check the Apps Script URL is correct.** In `config.js`, the
    `APPS_SCRIPT_URL` value must be the exact link you got when you deployed
@@ -150,7 +159,29 @@ how to check:
    photos are missing, check there — very large photos on a slow connection
    can occasionally take a little longer to finish uploading.
 
+5. **Check the Apps Script is the latest version.** Photos are only sent
+   once the Apps Script deployment understands one-photo-at-a-time uploads.
+   If the Sheet rows are arriving but photos never do, and the badge stays
+   on, the newest `apps-script.gs` probably hasn't been deployed yet. See
+   "Shipping an update" below.
+
 If none of that explains it, the safest next step is to ask whoever set this
 up to open the Apps Script editor and check **Executions** (in the left
 sidebar) for any red/failed runs — that log will usually say exactly what
 went wrong.
+
+---
+
+## 8. Shipping an update
+
+When anything in the app changes, do these in this order:
+
+1. **Apps Script first** (only if `apps-script.gs` changed). Paste the new
+   code into the Apps Script editor, then Deploy → Manage deployments →
+   edit (pencil) → Version: **New version** → Deploy. The URL doesn't
+   change, so `config.js` doesn't need touching.
+2. **Then the app files** — upload the changed files to GitHub as usual.
+3. **Bump the version in `sw.js`** whenever any app file changes (including
+   `config.js`): change `just-audio-shell-v2` to `v3`, and so on. Phones only
+   pick up new files when this number changes. They switch to the new
+   version the second time the app is opened after the upload.

@@ -3,8 +3,8 @@
 //
 // Plain-language map of what this file does, top to bottom:
 //   1. Small date/string helpers
-//   2. localStorage "database" for the passcode lock, rep's name, leads,
-//      and the offline queue
+//   2. localStorage "database" for the passcode lock, rep's name and leads
+//      (the offline queue lives in IndexedDB — see section 8)
 //   3. Passcode lock screen (first open only, per phone)
 //   4. Rep name prompt (first open only, per phone)
 //   5. Bottom nav tab switching
@@ -12,7 +12,8 @@
 //      handle tap-to-send, handle undo
 //   7. New Entry tab: chips, room-based labeled photo capture + compression,
 //      duplicate check, submit
-//   8. Offline queue: retry failed submissions automatically
+//   8. Offline queue: every submission is saved on the phone first, then
+//      sent in small pieces, retrying automatically until it gets through
 //   9. Service worker registration
 // ============================================================================
 
@@ -115,15 +116,15 @@
     localStorage.setItem(STORE_KEYS.leads, JSON.stringify(leads));
   }
 
-  function getQueue() {
+  // The offline queue used to live in localStorage under STORE_KEYS.queue.
+  // It now lives in IndexedDB (section 8) — this is only read once, to move
+  // anything left over from the old version across.
+  function getLegacyQueue() {
     try {
       return JSON.parse(localStorage.getItem(STORE_KEYS.queue)) || [];
     } catch (e) {
       return [];
     }
-  }
-  function saveQueue(queue) {
-    localStorage.setItem(STORE_KEYS.queue, JSON.stringify(queue));
   }
 
   // ---------------------------------------------------------------------
@@ -573,8 +574,6 @@
     lead.last_contacted = today;
     lead.next_action_date = addDays(today, offsetForStage(0));
 
-    const photos = collectPhotosPayload();
-
     const payload = {
       lead_id: lead.lead_id,
       created_at: lead.created_at,
@@ -591,11 +590,11 @@
       last_contacted: lead.last_contacted,
       status: lead.status,
       source: lead.source,
-      photos: photos
+      photos: collectPhotosPayload()
     };
 
     saveLeads(leads);
-    postLead(payload);
+    queueLead(payload);
 
     const template = CONFIG.TEMPLATES["first_" + lead.enquiry] || CONFIG.TEMPLATES.first_sales;
     const message = fillTemplate(template, {
@@ -629,68 +628,253 @@
 
   // ---------------------------------------------------------------------
   // 8. Offline queue
+  //
+  // Every submission goes through this queue: it is saved on the phone
+  // FIRST, then sent. So nothing is lost if the signal drops, the app is
+  // closed, or the phone switches to WhatsApp halfway through an upload.
+  //
+  // Each visit is split into small pieces: one tiny "lead" item (the row in
+  // the Sheet), then one item per photo. The row reaches the Sheet within a
+  // second or two even on bad wifi, and a failed photo only re-sends that
+  // one photo, not all of them.
+  //
+  // Items are sent one at a time, oldest first, and are only deleted from
+  // the phone once the Apps Script replies { ok: true }.
+  //
+  // The queue lives in IndexedDB (the browser's built-in database), which
+  // can hold hundreds of MB. localStorage, where it used to live, tops out
+  // around 5MB — two photo-heavy visits could fill it and silently lose a lead.
   // ---------------------------------------------------------------------
 
   const queueBadgeEl = document.getElementById("queue-badge");
 
-  function renderQueueBadge() {
-    const n = getQueue().length;
-    if (n > 0) {
-      queueBadgeEl.textContent = `${n} waiting`;
-      queueBadgeEl.classList.remove("hidden");
-    } else {
-      queueBadgeEl.classList.add("hidden");
+  const QUEUE_DB_NAME = "ja_queue_db";
+  const QUEUE_STORE = "items";
+  const LEAD_TIMEOUT_MS = 30000;          // give up on one row upload after 30s
+  const PHOTO_TIMEOUT_MS = 90000;         // give up on one photo upload after 90s
+  const RETRY_EVERY_MS = 60000;           // while online, check the queue every minute
+  const REJECTED_PAUSE_MS = 10 * 60000;   // wait 10 min before re-sending something the script refused
+
+  function hasBackend() {
+    return !!CONFIG.APPS_SCRIPT_URL && CONFIG.APPS_SCRIPT_URL.indexOf("PASTE_") !== 0;
+  }
+
+  // --- Storage -----------------------------------------------------------
+
+  let dbPromise = null;
+  function openQueueDb() {
+    if (!dbPromise) {
+      dbPromise = new Promise((resolve, reject) => {
+        if (!window.indexedDB) { reject(new Error("IndexedDB unavailable")); return; }
+        const req = indexedDB.open(QUEUE_DB_NAME, 1);
+        req.onupgradeneeded = () => {
+          const store = req.result.createObjectStore(QUEUE_STORE, { keyPath: "qid", autoIncrement: true });
+          store.createIndex("lead_id", "lead_id");
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
     }
+    return dbPromise;
   }
 
-  function postLead(payload) {
-    if (!CONFIG.APPS_SCRIPT_URL || CONFIG.APPS_SCRIPT_URL.indexOf("PASTE_") === 0) {
-      enqueue(payload);
-      return;
+  // Runs fn(store) in one IndexedDB transaction. Resolves once it has been
+  // committed to disk, with the result of the request fn returned (if any).
+  function withStore(mode, fn) {
+    return openQueueDb().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction(QUEUE_STORE, mode);
+      const req = fn(tx.objectStore(QUEUE_STORE));
+      tx.oncomplete = () => resolve(req ? req.result : undefined);
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction failed"));
+    }));
+  }
+
+  const idbStore = {
+    name: "idb",
+    add: (items) => withStore("readwrite", (s) => { items.forEach((item) => s.add(item)); }),
+    keys: () => withStore("readonly", (s) => s.getAllKeys()),
+    get: (key) => withStore("readonly", (s) => s.get(key)),
+    del: (key) => withStore("readwrite", (s) => s.delete(key)),
+    leadIds: () => {
+      const ids = [];
+      return withStore("readonly", (s) => {
+        const cursor = s.index("lead_id").openKeyCursor(null, "nextunique");
+        cursor.onsuccess = () => {
+          if (cursor.result) { ids.push(cursor.result.key); cursor.result.continue(); }
+        };
+      }).then(() => ids);
     }
-    fetch(CONFIG.APPS_SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload)
-    })
-      .then((r) => { if (!r.ok) throw new Error("bad status"); return r.json(); })
-      .catch(() => { enqueue(payload); });
+  };
+
+  // Last-resort fallback if IndexedDB can't be used at all (very old
+  // browsers, some private-browsing modes, or a completely full phone).
+  // Items here are still sent, but are lost if the app is closed first —
+  // the badge says "keep app open" while anything is in here.
+  const memStore = {
+    name: "mem",
+    items: [],
+    nextId: 1,
+    add(items) {
+      items.forEach((item) => this.items.push(Object.assign({}, item, { qid: this.nextId++ })));
+      return Promise.resolve();
+    },
+    keys() { return Promise.resolve(this.items.map((i) => i.qid)); },
+    get(key) { return Promise.resolve(this.items.find((i) => i.qid === key)); },
+    del(key) { this.items = this.items.filter((i) => i.qid !== key); return Promise.resolve(); },
+    leadIds() { return Promise.resolve(this.items.map((i) => i.lead_id)); }
+  };
+
+  // --- Adding to the queue -------------------------------------------------
+
+  // Splits one submission (row fields + photos array) into queue items: the
+  // row first, then one item per photo. Each photo gets a fixed photo_id
+  // here, once, so if an upload is retried after the server already saved
+  // it, the Apps Script spots the repeat and doesn't save it twice.
+  let splitCounter = 0;
+  function splitSubmission(payload) {
+    const leadItem = Object.assign({}, payload, { kind: "lead" });
+    delete leadItem.photos;
+    const batch = `${Date.now()}${splitCounter++}`;
+    const photoItems = (payload.photos || []).map((p, i) => ({
+      kind: "photo",
+      lead_id: payload.lead_id,
+      venue: payload.venue,
+      photo_id: `${payload.lead_id}-${batch}-${i}`,
+      room: p.room,
+      label: p.label,
+      dataUrl: p.dataUrl
+    }));
+    return [leadItem].concat(photoItems);
   }
 
-  function enqueue(payload) {
-    const queue = getQueue();
-    queue.push(payload);
-    saveQueue(queue);
-    renderQueueBadge();
+  function queueLead(payload) {
+    const items = splitSubmission(payload);
+    idbStore.add(items)
+      .catch(() => memStore.add(items))
+      .then(() => { renderQueueBadge(); drainQueue(); });
   }
 
-  function retryQueue() {
-    const queue = getQueue();
-    if (queue.length === 0) return;
-    if (!CONFIG.APPS_SCRIPT_URL || CONFIG.APPS_SCRIPT_URL.indexOf("PASTE_") === 0) return;
+  // Anything the old version of the app left in localStorage is moved into
+  // IndexedDB, then removed from localStorage. If IndexedDB can't take it,
+  // it is left where it is and tried again next time the app opens.
+  function migrateLegacyQueue() {
+    const legacy = getLegacyQueue();
+    if (legacy.length === 0) return Promise.resolve();
+    const items = [];
+    legacy.forEach((payload) => { items.push(...splitSubmission(payload)); });
+    return idbStore.add(items)
+      .then(() => localStorage.removeItem(STORE_KEYS.queue))
+      .catch(() => {});
+  }
 
-    const remaining = [];
-    let pending = queue.length;
+  // --- Sending -------------------------------------------------------------
 
-    queue.forEach((payload) => {
-      fetch(CONFIG.APPS_SCRIPT_URL, {
+  function timedFetch(url, options, ms) {
+    if (!window.AbortController) return fetch(url, options);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    return fetch(url, Object.assign({}, options, { signal: controller.signal }))
+      .finally(() => clearTimeout(timer));
+  }
+
+  // Before sending any photo, check the Apps Script deployment is the
+  // version that understands one-photo-at-a-time uploads. An older
+  // deployment would mistake a photo for a lead and blank out that lead's
+  // row, so photos wait in the queue until the new script is deployed.
+  let serverSupportsPhotoItems = false;
+  function checkServerVersion() {
+    if (serverSupportsPhotoItems) return Promise.resolve("ok");
+    return timedFetch(`${CONFIG.APPS_SCRIPT_URL}?v=1`, {}, LEAD_TIMEOUT_MS)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && data.v >= 2) { serverSupportsPhotoItems = true; return "ok"; }
+        return "rejected";
+      }, () => "network");
+  }
+
+  // Sends one queue item. Resolves with:
+  //   "ok"       — the Apps Script saved it; safe to delete from the phone
+  //   "network"  — no signal, timeout, or a Google error page; stop for now
+  //   "rejected" — the Apps Script answered but refused it; leave it queued
+  //                and carry on with the rest of the queue
+  function sendItem(item) {
+    const gate = item.kind === "photo" ? checkServerVersion() : Promise.resolve("ok");
+    return gate.then((state) => {
+      if (state !== "ok") return state;
+      const body = Object.assign({}, item);
+      delete body.qid;
+      return timedFetch(CONFIG.APPS_SCRIPT_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(payload)
-      })
-        .then((r) => { if (!r.ok) throw new Error("bad status"); })
-        .catch(() => { remaining.push(payload); })
-        .finally(() => {
-          pending -= 1;
-          if (pending === 0) {
-            saveQueue(remaining);
-            renderQueueBadge();
-          }
-        });
+        body: JSON.stringify(body)
+      }, item.kind === "photo" ? PHOTO_TIMEOUT_MS : LEAD_TIMEOUT_MS)
+        .then((r) => { if (!r.ok) throw new Error("bad status"); return r.json(); })
+        .then((data) => (data && data.ok === true ? "ok" : "rejected"), () => "network");
     });
   }
 
-  window.addEventListener("online", retryQueue);
+  const rejectedUntil = {}; // "store:qid" -> time before which we don't re-send it
+
+  function drainStore(store, state) {
+    return store.keys().catch(() => []).then((keys) => keys.reduce((chain, key) => chain.then(() => {
+      if (state.stop) return;
+      const tag = `${store.name}:${key}`;
+      if (rejectedUntil[tag] > Date.now()) return;
+      return store.get(key).then((item) => {
+        if (!item) return; // already sent (e.g. by another open copy of the app)
+        return sendItem(item).then((result) => {
+          if (result === "ok") {
+            delete rejectedUntil[tag];
+            return store.del(key).then(renderQueueBadge);
+          }
+          if (result === "network") state.stop = true;
+          else rejectedUntil[tag] = Date.now() + REJECTED_PAUSE_MS;
+        });
+      });
+    }), Promise.resolve()));
+  }
+
+  // Only one drain runs at a time. If something asks for a drain while one
+  // is running (a new submit, signal coming back), it runs again right after.
+  // navigator.locks does the same across two open copies of the app.
+  let draining = false;
+  let drainRequested = false;
+
+  function drainQueue() {
+    if (!hasBackend()) return Promise.resolve();
+    if (draining) { drainRequested = true; return Promise.resolve(); }
+    draining = true;
+    drainRequested = false;
+    const run = () => {
+      const state = { stop: false };
+      return drainStore(idbStore, state).then(() => drainStore(memStore, state));
+    };
+    const done = navigator.locks ? navigator.locks.request("ja-queue-drain", run) : run();
+    return done.catch(() => {}).then(() => {
+      draining = false;
+      renderQueueBadge();
+      if (drainRequested) drainQueue();
+    });
+  }
+
+  // "2 waiting" = number of visits with a row or photos still to send.
+  function renderQueueBadge() {
+    return Promise.all([idbStore.leadIds().catch(() => []), memStore.leadIds()]).then(([a, b]) => {
+      const n = new Set(a.concat(b)).size;
+      if (n > 0) {
+        queueBadgeEl.textContent = memStore.items.length ? `${n} waiting · keep app open` : `${n} waiting`;
+        queueBadgeEl.classList.remove("hidden");
+      } else {
+        queueBadgeEl.classList.add("hidden");
+      }
+    });
+  }
+
+  window.addEventListener("online", drainQueue);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") drainQueue();
+  });
+  setInterval(() => { if (navigator.onLine !== false) drainQueue(); }, RETRY_EVERY_MS);
 
   // ---------------------------------------------------------------------
   // 9. Service worker
@@ -707,5 +891,5 @@
   // ---------------------------------------------------------------------
 
   initPasscode();
-  retryQueue();
+  migrateLegacyQueue().then(() => { renderQueueBadge(); drainQueue(); });
 })();
