@@ -12,11 +12,19 @@
 </head>
 <body>
 
+<!-- Full-screen lock screen shown once per phone, before anything else -->
+<div id="passcode-prompt" class="fullscreen-prompt hidden">
+  <h1>Enter passcode</h1>
+  <input id="passcode-input" class="fullscreen-prompt-input" type="password" inputmode="numeric" placeholder="Passcode" autocomplete="off">
+  <div id="passcode-error" class="inline-error"></div>
+  <button id="passcode-save-btn" class="fullscreen-prompt-btn">Unlock</button>
+</div>
+
 <!-- Full-screen prompt shown once, the very first time the app is opened -->
-<div id="rep-prompt" class="hidden">
+<div id="rep-prompt" class="fullscreen-prompt hidden">
   <h1>Your name?</h1>
-  <input id="rep-name-input" type="text" placeholder="e.g. Rohan" autocomplete="off">
-  <button id="rep-save-btn">Save</button>
+  <input id="rep-name-input" class="fullscreen-prompt-input" type="text" placeholder="e.g. Rohan" autocomplete="off">
+  <button id="rep-save-btn" class="fullscreen-prompt-btn">Save</button>
 </div>
 
 <main id="app" class="hidden">
@@ -28,7 +36,7 @@
       <span id="queue-badge" class="queue-badge hidden"></span>
     </div>
     <ul id="followups-list"></ul>
-    <div id="followups-empty" class="empty-state hidden">Nothing due today.</div>
+    <div id="followups-empty" class="empty-state hidden">No leads yet.</div>
     <div id="done-section" class="hidden">
       <div id="done-heading">Done today</div>
       <ul id="followups-done"></ul>
@@ -74,20 +82,9 @@
       </div>
 
       <div class="field-group">
-        <span class="field-label">Nudge again in</span>
-        <div class="chip-row" id="nudge-chips">
-          <button type="button" class="chip" data-value="tomorrow">Tomorrow</button>
-          <button type="button" class="chip" data-value="3 days">3 days</button>
-          <button type="button" class="chip" data-value="1 week">1 week</button>
-          <button type="button" class="chip" data-value="1 month">1 month</button>
-        </div>
-      </div>
-
-      <div class="field-group">
         <span class="field-label">Photos</span>
-        <div class="photo-row" id="photo-row">
-          <!-- 5 slots injected by app.js -->
-        </div>
+        <div id="rooms-container"><!-- rooms + labeled slots injected by app.js --></div>
+        <button type="button" id="add-room-btn">+ Add another room</button>
       </div>
 
       <div class="field-group">

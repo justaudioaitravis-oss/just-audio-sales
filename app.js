@@ -3,13 +3,17 @@
 //
 // Plain-language map of what this file does, top to bottom:
 //   1. Small date/string helpers
-//   2. localStorage "database" for the rep's name, leads, and the offline queue
-//   3. Rep name prompt (first open only)
-//   4. Bottom nav tab switching
-//   5. Follow-ups tab: render list, handle tap-to-send, handle undo
-//   6. New Entry tab: chips, photo capture + compression, duplicate check, submit
-//   7. Offline queue: retry failed submissions automatically
-//   8. Service worker registration
+//   2. localStorage "database" for the passcode lock, rep's name, leads,
+//      and the offline queue
+//   3. Passcode lock screen (first open only, per phone)
+//   4. Rep name prompt (first open only, per phone)
+//   5. Bottom nav tab switching
+//   6. Follow-ups tab: render list (every lead, with its next contact date),
+//      handle tap-to-send, handle undo
+//   7. New Entry tab: chips, room-based labeled photo capture + compression,
+//      duplicate check, submit
+//   8. Offline queue: retry failed submissions automatically
+//   9. Service worker registration
 // ============================================================================
 
 (function () {
@@ -55,13 +59,23 @@
     return dt.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
   }
 
-  function nudgeLabel(nudgeKey) {
-    switch (nudgeKey) {
-      case "tomorrow": return "Next-day nudge";
-      case "3 days": return "3-day nudge";
-      case "1 week": return "1-week nudge";
-      case "1 month": return "1-month nudge";
-      default: return "Nudge";
+  // The automatic reminder cadence. Stage 0 is the first reminder after a
+  // visit, stage 1 the second, and so on. Every offset counts days from the
+  // visit date itself (CONFIG.REMINDER_SCHEDULE_DAYS), and once that list
+  // runs out, reminders keep repeating every CONFIG.MONTHLY_INTERVAL_DAYS.
+  function offsetForStage(stage) {
+    const schedule = CONFIG.REMINDER_SCHEDULE_DAYS;
+    if (stage < schedule.length) return schedule[stage];
+    const extra = stage - schedule.length + 1;
+    return schedule[schedule.length - 1] + CONFIG.MONTHLY_INTERVAL_DAYS * extra;
+  }
+
+  function stageInfo(stage) {
+    switch (stage) {
+      case 0: return { label: "2-day nudge", template: "nudge_2day" };
+      case 1: return { label: "1-week nudge", template: "nudge_1week" };
+      case 2: return { label: "2-week nudge", template: "nudge_2week" };
+      default: return { label: "Monthly nudge", template: "nudge_monthly" };
     }
   }
 
@@ -70,10 +84,18 @@
   // ---------------------------------------------------------------------
 
   const STORE_KEYS = {
+    unlocked: "ja_unlocked",
     rep: "ja_rep",
     leads: "ja_leads",
     queue: "ja_queue"
   };
+
+  function isUnlocked() {
+    return localStorage.getItem(STORE_KEYS.unlocked) === "yes";
+  }
+  function setUnlocked() {
+    localStorage.setItem(STORE_KEYS.unlocked, "yes");
+  }
 
   function getRep() {
     return localStorage.getItem(STORE_KEYS.rep) || "";
@@ -105,7 +127,35 @@
   }
 
   // ---------------------------------------------------------------------
-  // 3. Rep name prompt
+  // 3. Passcode lock screen
+  // ---------------------------------------------------------------------
+
+  const passcodePromptEl = document.getElementById("passcode-prompt");
+  const passcodeInput = document.getElementById("passcode-input");
+  const passcodeError = document.getElementById("passcode-error");
+  const passcodeSaveBtn = document.getElementById("passcode-save-btn");
+
+  function initPasscode() {
+    if (isUnlocked()) {
+      initRepPrompt();
+      return;
+    }
+    passcodePromptEl.classList.remove("hidden");
+    passcodeSaveBtn.addEventListener("click", () => {
+      if (passcodeInput.value === CONFIG.PASSCODE) {
+        setUnlocked();
+        passcodePromptEl.classList.add("hidden");
+        initRepPrompt();
+      } else {
+        passcodeError.textContent = "Incorrect passcode.";
+        passcodeInput.value = "";
+        passcodeInput.focus();
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // 4. Rep name prompt
   // ---------------------------------------------------------------------
 
   const repPromptEl = document.getElementById("rep-prompt");
@@ -140,7 +190,7 @@
   }
 
   // ---------------------------------------------------------------------
-  // 4. Bottom nav
+  // 5. Bottom nav
   // ---------------------------------------------------------------------
 
   document.querySelectorAll(".nav-btn").forEach((btn) => {
@@ -154,7 +204,7 @@
   }
 
   // ---------------------------------------------------------------------
-  // 5. Follow-ups tab
+  // 6. Follow-ups tab
   // ---------------------------------------------------------------------
 
   const followupsListEl = document.getElementById("followups-list");
@@ -178,22 +228,24 @@
 
   function draftFor(lead) {
     const today = todayStr();
-    const late = daysBetween(lead.next_action_date, today);
-    let kind;
-    let template;
+    const diff = daysBetween(lead.next_action_date, today); // >0 = overdue, <0 = upcoming
 
-    if (!lead.last_contacted) {
-      kind = "First message";
-      template = CONFIG.TEMPLATES["first_" + lead.enquiry] || CONFIG.TEMPLATES.first_sales;
-    } else if (lead.status === "quoted") {
+    let kind, template;
+    if (lead.status === "quoted") {
       kind = "Quote chase";
       template = CONFIG.TEMPLATES.quote_chase;
     } else {
-      kind = nudgeLabel(lead.nudge_interval);
-      template = CONFIG.TEMPLATES.nudge;
+      const info = stageInfo(lead.reminder_stage || 0);
+      kind = info.label;
+      template = CONFIG.TEMPLATES[info.template];
     }
 
-    const label = late > 0 ? `${kind} · ${late} day${late === 1 ? "" : "s"} late` : kind;
+    let label = kind;
+    if (diff > 0) {
+      label = `${kind} · ${diff} day${diff === 1 ? "" : "s"} late`;
+    } else if (diff < 0) {
+      label = `${kind} · due ${formatDateHuman(lead.next_action_date)}`;
+    }
 
     const message = fillTemplate(template, {
       name: lead.contact_name,
@@ -211,8 +263,10 @@
     leads = clearStaleDone(leads);
     const today = todayStr();
 
+    // Every lead shows up immediately, the moment a visit is logged — not
+    // only once its next reminder is due — sorted soonest-due first.
     const active = leads
-      .filter((l) => !l._doneAt && l.next_action_date <= today)
+      .filter((l) => !l._doneAt)
       .sort((a, b) => (a.next_action_date < b.next_action_date ? -1 : a.next_action_date > b.next_action_date ? 1 : 0));
 
     const done = leads.filter((l) => l._doneAt === today);
@@ -229,7 +283,7 @@
       followupsListEl.appendChild(li);
     });
 
-    followupsEmptyEl.classList.toggle("hidden", active.length > 0);
+    followupsEmptyEl.classList.toggle("hidden", leads.length > 0);
 
     followupsDoneEl.innerHTML = "";
     done.forEach((lead) => {
@@ -256,12 +310,13 @@
 
     const today = todayStr();
     lead._prevState = {
+      reminder_stage: lead.reminder_stage,
       next_action_date: lead.next_action_date,
       last_contacted: lead.last_contacted,
       status: lead.status
     };
-    const interval = CONFIG.NUDGE_DAYS[lead.nudge_interval] || 3;
-    lead.next_action_date = addDays(today, interval);
+    lead.reminder_stage = (lead.reminder_stage || 0) + 1;
+    lead.next_action_date = addDays(lead.schedule_anchor, offsetForStage(lead.reminder_stage));
     lead.last_contacted = today;
     lead._doneAt = today;
 
@@ -274,6 +329,7 @@
     const lead = leads.find((l) => l.lead_id === leadId);
     if (!lead || !lead._prevState) return;
 
+    lead.reminder_stage = lead._prevState.reminder_stage;
     lead.next_action_date = lead._prevState.next_action_date;
     lead.last_contacted = lead._prevState.last_contacted;
     lead.status = lead._prevState.status;
@@ -285,7 +341,7 @@
   }
 
   // ---------------------------------------------------------------------
-  // 6. New Entry tab
+  // 7. New Entry tab
   // ---------------------------------------------------------------------
 
   const phoneInput = document.getElementById("phone-input");
@@ -297,10 +353,10 @@
   const noteInput = document.getElementById("note-input");
   const submitBtn = document.getElementById("submit-btn");
   const newForm = document.getElementById("new-form");
-  const photoRowEl = document.getElementById("photo-row");
+  const roomsContainerEl = document.getElementById("rooms-container");
+  const addRoomBtn = document.getElementById("add-room-btn");
 
   let selectedEnquiry = "sales";
-  let selectedNudge = "3 days";
   let foundDupeLeadId = null;
 
   // Phone: allow spaces while typing, keep it visually grouped
@@ -349,7 +405,7 @@
       });
   });
 
-  // Chips: enquiry (dark fill) and nudge (accent fill)
+  // Chips: enquiry (dark fill)
   function setupChipGroup(containerId, styleClass, defaultValue, onSelect) {
     const container = document.getElementById(containerId);
     const chips = Array.from(container.querySelectorAll(".chip"));
@@ -361,30 +417,77 @@
     select(defaultValue);
   }
   setupChipGroup("enquiry-chips", "selected-dark", "sales", (v) => { selectedEnquiry = v; });
-  setupChipGroup("nudge-chips", "selected-accent", "3 days", (v) => { selectedNudge = v; });
 
-  // Photos: 5 slots, each a file input capturing the camera
-  const PHOTO_SLOT_COUNT = 5;
-  const photoDataUrls = new Array(PHOTO_SLOT_COUNT).fill(null);
+  // Photos: room-based, each room has its own set of labeled slots.
+  // rooms[0] uses CONFIG.ROOM_ONE_LABELS; every room added after that uses
+  // CONFIG.EXTRA_ROOM_LABELS. Each room stores { label: dataUrl }.
+  let rooms = [];
 
-  function buildPhotoSlots() {
-    photoRowEl.innerHTML = "";
-    for (let i = 0; i < PHOTO_SLOT_COUNT; i++) {
-      const slot = document.createElement("div");
-      slot.className = "photo-slot";
-      slot.innerHTML = `<input type="file" accept="image/*" capture="environment">`;
-      const input = slot.querySelector("input");
-      input.addEventListener("change", () => handlePhotoChosen(i, input, slot));
-      photoRowEl.appendChild(slot);
-    }
+  function resetRooms() {
+    rooms = [{ labels: CONFIG.ROOM_ONE_LABELS, photos: {} }];
+    renderRooms();
   }
-  buildPhotoSlots();
 
-  function handlePhotoChosen(index, input, slot) {
+  function renderRooms() {
+    roomsContainerEl.innerHTML = "";
+    rooms.forEach((room, roomIndex) => {
+      const block = document.createElement("div");
+      block.className = "room-block";
+
+      if (rooms.length > 1) {
+        const heading = document.createElement("div");
+        heading.className = "room-heading";
+        heading.textContent = `Room ${roomIndex + 1}`;
+        block.appendChild(heading);
+      }
+
+      const row = document.createElement("div");
+      row.className = "photo-row";
+
+      room.labels.forEach((label) => {
+        const cell = document.createElement("div");
+        cell.className = "photo-cell";
+
+        const slot = document.createElement("div");
+        slot.className = "photo-slot";
+        const existing = room.photos[label];
+        if (existing) {
+          const img = document.createElement("img");
+          img.src = existing;
+          slot.appendChild(img);
+        }
+
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = "image/*";
+        input.capture = "environment";
+        input.addEventListener("change", () => handlePhotoChosen(roomIndex, label, input, slot));
+        slot.appendChild(input);
+
+        const caption = document.createElement("div");
+        caption.className = "photo-cell-label";
+        caption.textContent = label;
+
+        cell.appendChild(slot);
+        cell.appendChild(caption);
+        row.appendChild(cell);
+      });
+
+      block.appendChild(row);
+      roomsContainerEl.appendChild(block);
+    });
+  }
+
+  addRoomBtn.addEventListener("click", () => {
+    rooms.push({ labels: CONFIG.EXTRA_ROOM_LABELS, photos: {} });
+    renderRooms();
+  });
+
+  function handlePhotoChosen(roomIndex, label, input, slot) {
     const file = input.files && input.files[0];
     if (!file) return;
     compressImage(file, 1600, 0.7).then((dataUrl) => {
-      photoDataUrls[index] = dataUrl;
+      rooms[roomIndex].photos[label] = dataUrl;
       let img = slot.querySelector("img");
       if (!img) {
         img = document.createElement("img");
@@ -412,6 +515,18 @@
       reader.readAsDataURL(file);
     });
   }
+
+  function collectPhotosPayload() {
+    const photos = [];
+    rooms.forEach((room, roomIndex) => {
+      Object.keys(room.photos).forEach((label) => {
+        photos.push({ room: roomIndex + 1, label, dataUrl: room.photos[label] });
+      });
+    });
+    return photos;
+  }
+
+  resetRooms();
 
   // Submit
   newForm.addEventListener("submit", (e) => {
@@ -450,11 +565,15 @@
     lead.enquiry = selectedEnquiry;
     lead.visit_date = today;
     lead.note = noteInput.value.trim();
-    lead.nudge_interval = selectedNudge;
-    lead.last_contacted = today;
-    lead.next_action_date = addDays(today, CONFIG.NUDGE_DAYS[selectedNudge] || 3);
 
-    const photos = photoDataUrls.filter(Boolean);
+    // Every visit is treated as a fresh "initial contact" — the reminder
+    // schedule resets and counts forward from today.
+    lead.schedule_anchor = today;
+    lead.reminder_stage = 0;
+    lead.last_contacted = today;
+    lead.next_action_date = addDays(today, offsetForStage(0));
+
+    const photos = collectPhotosPayload();
 
     const payload = {
       lead_id: lead.lead_id,
@@ -466,7 +585,8 @@
       enquiry: lead.enquiry,
       visit_date: lead.visit_date,
       note: lead.note,
-      nudge_interval: lead.nudge_interval,
+      reminder_stage: lead.reminder_stage,
+      schedule_anchor: lead.schedule_anchor,
       next_action_date: lead.next_action_date,
       last_contacted: lead.last_contacted,
       status: lead.status,
@@ -501,17 +621,14 @@
     phoneRow.classList.remove("error");
     dupeLine.classList.add("hidden");
     foundDupeLeadId = null;
-    photoDataUrls.fill(null);
-    buildPhotoSlots();
+    resetRooms();
     updateSubmitLabel();
     document.querySelectorAll("#enquiry-chips .chip").forEach((c) => c.classList.toggle("selected-dark", c.dataset.value === "sales"));
     selectedEnquiry = "sales";
-    document.querySelectorAll("#nudge-chips .chip").forEach((c) => c.classList.toggle("selected-accent", c.dataset.value === "3 days"));
-    selectedNudge = "3 days";
   }
 
   // ---------------------------------------------------------------------
-  // 7. Offline queue
+  // 8. Offline queue
   // ---------------------------------------------------------------------
 
   const queueBadgeEl = document.getElementById("queue-badge");
@@ -576,7 +693,7 @@
   window.addEventListener("online", retryQueue);
 
   // ---------------------------------------------------------------------
-  // 8. Service worker
+  // 9. Service worker
   // ---------------------------------------------------------------------
 
   if ("serviceWorker" in navigator) {
@@ -589,6 +706,6 @@
   // Boot
   // ---------------------------------------------------------------------
 
-  initRepPrompt();
+  initPasscode();
   retryQueue();
 })();

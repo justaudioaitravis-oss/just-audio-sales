@@ -3,7 +3,7 @@
 A small app for your phone's home screen. No accounts, no menus — just a
 Follow-ups list and a New Entry form.
 
-This file explains the four things you're most likely to need later.
+This file explains the things you're most likely to need later.
 
 ---
 
@@ -44,17 +44,74 @@ that gets pre-filled into WhatsApp. A few rules:
 - Keep the `+` signs joining the lines together, and the quote marks around
   the text.
 
-Example — to change the nudge message:
+There are now separate templates for each stage of the automatic follow-up
+schedule (see section 3 below) — `nudge_2day`, `nudge_1week`, `nudge_2week`,
+and `nudge_monthly` — plus the three first-contact ones (`first_sales`,
+`first_service`, `first_acoustics`). Edit any of them the same way, e.g.:
 
 ```js
-nudge: "Hi {name}, this is {rep} from {company}, checking in on {venue}.",
+nudge_2day: "Hi {name}, this is {rep} from {company}, checking in on {venue}.",
 ```
 
 Save the file and re-upload it the same way as above.
 
 ---
 
-## 3. Exporting the sheet to Excel
+## 3. Changing the follow-up schedule
+
+Also in `config.js`, this section controls how many days after a visit each
+automatic reminder is due:
+
+```js
+REMINDER_SCHEDULE_DAYS: [2, 7, 14],
+MONTHLY_INTERVAL_DAYS: 30,
+```
+
+By default: the first reminder is due 2 days after a visit, the second a
+week after, the third two weeks after, and then it repeats every 30 days
+after that for as long as the lead stays open. To change the cadence,
+edit the numbers in the list (and the monthly number if you want a
+different repeat gap), save, and re-upload.
+
+Each visit resets this countdown — so if you visit the same venue again,
+the schedule starts over from that new visit date.
+
+---
+
+## 4. Changing the passcode
+
+The app is locked behind a simple passcode screen so the link isn't wide
+open to the public. In `config.js`:
+
+```js
+PASSCODE: "1234",
+```
+
+Change the value, save, and re-upload. Anyone who already unlocked the app
+on their phone won't be asked again (it only asks once per phone) — if you
+change the passcode, only new phones (or phones where someone clears their
+browser data) will be asked for the new one. This is a basic lock, not
+strong security — good enough to keep a private tool private, not something
+to rely on for sensitive information.
+
+---
+
+## 5. The photo rooms
+
+Each lead gets one "Room 1" of 5 labelled photo slots (Front wall, Left
+wall, Right wall, Back wall, Ceiling) built in automatically. Tapping
+"+ Add another room" adds a further set of 6 labelled slots (the same 5,
+plus an Overview shot) for a second room, and so on for as many rooms as
+needed. All photos are optional and never block submission. To change the
+labels themselves, edit `ROOM_ONE_LABELS` and `EXTRA_ROOM_LABELS` in
+`config.js`.
+
+In the Google Drive folder, photos are organised as: **Just Audio - Lead
+Photos** → venue name → Room 1 / Room 2 / etc. → one file per label.
+
+---
+
+## 6. Exporting the sheet to Excel
 
 1. Open the Google Sheet in your browser.
 2. Go to **File > Download**.
@@ -65,7 +122,7 @@ You can do this any time, as often as you like — it never affects the live dat
 
 ---
 
-## 4. If a submission doesn't appear in the sheet
+## 7. If a submission doesn't appear in the sheet
 
 The app is built to never lose a submission, even with no signal — but here's
 how to check:

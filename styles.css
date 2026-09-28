@@ -42,9 +42,9 @@ body {
 
 .hidden { display: none !important; }
 
-/* ---------- Rep name prompt ---------- */
+/* ---------- Full-screen prompts (passcode lock, rep name) ---------- */
 
-#rep-prompt {
+.fullscreen-prompt {
   position: fixed;
   inset: 0;
   background: var(--bg);
@@ -57,9 +57,9 @@ body {
   gap: 16px;
 }
 
-#rep-prompt h1 { font-size: 22px; text-align: center; }
+.fullscreen-prompt h1 { font-size: 22px; text-align: center; }
 
-#rep-name-input {
+.fullscreen-prompt-input {
   width: 100%;
   max-width: 320px;
   font-size: 18px;
@@ -70,9 +70,9 @@ body {
   color: var(--text);
   text-align: center;
 }
-#rep-name-input:focus { outline: none; border-bottom-color: var(--accent); }
+.fullscreen-prompt-input:focus { outline: none; border-bottom-color: var(--accent); }
 
-#rep-save-btn {
+.fullscreen-prompt-btn {
   width: 100%;
   max-width: 320px;
   min-height: 48px;
@@ -291,18 +291,39 @@ nav.bottom-nav {
   color: #fff;
 }
 
-/* Shrink nudge chip labels before letting them wrap/clip at narrow widths */
-@media (max-width: 380px) {
-  #nudge-chips .chip { font-size: 12px; padding: 0 4px; }
+.room-block {
+  margin-bottom: 16px;
+}
+
+.room-heading {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
 }
 
 .photo-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 10px;
+}
+
+.photo-cell {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.photo-cell-label {
+  font-size: 10px;
+  color: var(--muted);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .photo-slot {
-  flex: 1;
+  width: 100%;
   height: 58px;
   border: 1px dashed var(--hairline);
   border-radius: 8px;
@@ -310,6 +331,17 @@ nav.bottom-nav {
   overflow: hidden;
   background: transparent;
   padding: 0;
+}
+
+#add-room-btn {
+  margin-top: 4px;
+  min-height: 44px;
+  width: 100%;
+  border: 1px dashed var(--hairline);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .photo-slot img {

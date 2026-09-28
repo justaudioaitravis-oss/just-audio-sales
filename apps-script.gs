@@ -5,8 +5,14 @@
  *
  * Sheet columns, in this exact order (create this header row once):
  * lead_id | created_at | rep | phone | contact_name | venue | enquiry |
- * visit_date | note | photo_folder | nudge_interval | next_action_date |
- * last_contacted | status | source
+ * visit_date | note | photo_folder | reminder_stage | schedule_anchor |
+ * next_action_date | last_contacted | status | source
+ *
+ * reminder_stage  — how many automatic reminders have gone out since the
+ *                    last visit (0 = none yet). Used with schedule_anchor
+ *                    to work out when the next one is due.
+ * schedule_anchor — the date of the visit the reminder countdown resets
+ *                    from (set fresh every time a visit is logged).
  *
  * doPost  — appends a new row, or updates the existing row if lead_id
  *           already exists in the sheet.
@@ -19,8 +25,8 @@ const DRIVE_ROOT_FOLDER_NAME = "Just Audio - Lead Photos";
 
 const COLUMNS = [
   "lead_id", "created_at", "rep", "phone", "contact_name", "venue",
-  "enquiry", "visit_date", "note", "photo_folder", "nudge_interval",
-  "next_action_date", "last_contacted", "status", "source"
+  "enquiry", "visit_date", "note", "photo_folder", "reminder_stage",
+  "schedule_anchor", "next_action_date", "last_contacted", "status", "source"
 ];
 
 function getSheet_() {
@@ -112,19 +118,23 @@ function doPost(e) {
 
 // ---------------------------------------------------------------------
 // Photo handling — decode base64 JPEGs, save into a Drive folder named
-// after the venue (inside one root folder), return the folder URL.
+// after the venue (inside one root folder), with one subfolder per room,
+// and each photo file named after its wall/ceiling label. Returns the
+// venue folder's URL.
 // ---------------------------------------------------------------------
 
-function savePhotos_(venueName, base64Photos) {
+function savePhotos_(venueName, photos) {
   const root = getOrCreateFolder_(DriveApp.getRootFolder(), DRIVE_ROOT_FOLDER_NAME);
   const venueFolder = getOrCreateFolder_(root, venueName);
 
-  base64Photos.forEach((dataUrl, idx) => {
-    const commaIdx = dataUrl.indexOf(",");
-    const base64 = commaIdx >= 0 ? dataUrl.substring(commaIdx + 1) : dataUrl;
+  photos.forEach((photo) => {
+    const roomFolder = getOrCreateFolder_(venueFolder, `Room ${photo.room || 1}`);
+    const commaIdx = photo.dataUrl.indexOf(",");
+    const base64 = commaIdx >= 0 ? photo.dataUrl.substring(commaIdx + 1) : photo.dataUrl;
     const bytes = Utilities.base64Decode(base64);
-    const blob = Utilities.newBlob(bytes, "image/jpeg", `photo-${Date.now()}-${idx}.jpg`);
-    venueFolder.createFile(blob);
+    const safeLabel = String(photo.label || "photo").replace(/[^a-zA-Z0-9 _-]/g, "");
+    const blob = Utilities.newBlob(bytes, "image/jpeg", `${safeLabel}.jpg`);
+    roomFolder.createFile(blob);
   });
 
   return venueFolder.getUrl();
