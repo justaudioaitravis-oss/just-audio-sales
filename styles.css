@@ -142,6 +142,9 @@ section.tab.active { display: block; }
   margin-top: 2px;
 }
 
+/* Not due yet: shown so you can see what's coming, but can't be sent early */
+.lead-row.upcoming .venue { color: var(--muted); }
+
 .lead-row.done {
   color: var(--muted);
   opacity: 0.6;

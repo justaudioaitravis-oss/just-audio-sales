@@ -257,9 +257,22 @@
     });
   }
 
-  function leadRowEl(lead, label, done) {
+  // What a "Done today" row says: the message that was just sent (not the
+  // next one), so it can't be mistaken for a reminder waiting to go out.
+  function doneLabel(lead) {
+    const sent = lead._prevState ? draftKind(lead._prevState).kind : draftKind(lead).kind;
+    return `${sent} sent · tap to undo`;
+  }
+
+  // A reminder can be sent from its due date onward (due today, or late) —
+  // never before. E.g. no 2-day nudge on the day of the visit itself.
+  function isDue(lead, today) {
+    return lead.next_action_date <= today;
+  }
+
+  function leadRowEl(lead, label, rowClass) {
     const li = document.createElement("li");
-    li.className = done ? "lead-row done" : "lead-row";
+    li.className = `lead-row ${rowClass}`;
     li.dataset.id = lead.lead_id;
     const venue = document.createElement("div");
     venue.className = "venue";
@@ -287,23 +300,25 @@
     // Rows are built off-screen and swapped in at once, so the page only
     // has to lay out the list one time however long it is.
     const activeRows = document.createDocumentFragment();
-    active.forEach((lead) => activeRows.appendChild(leadRowEl(lead, draftLabel(lead, today), false)));
+    active.forEach((lead) => {
+      activeRows.appendChild(leadRowEl(lead, draftLabel(lead, today), isDue(lead, today) ? "due" : "upcoming"));
+    });
     followupsListEl.textContent = "";
     followupsListEl.appendChild(activeRows);
 
     followupsEmptyEl.classList.toggle("hidden", leads.length > 0);
 
     const doneRows = document.createDocumentFragment();
-    done.forEach((lead) => doneRows.appendChild(leadRowEl(lead, draftLabel(lead, today), true)));
+    done.forEach((lead) => doneRows.appendChild(leadRowEl(lead, doneLabel(lead), "done")));
     followupsDoneEl.textContent = "";
     followupsDoneEl.appendChild(doneRows);
     doneSectionEl.classList.toggle("hidden", done.length === 0);
   }
 
   // One tap listener per list (rather than one per row) — rows say which
-  // lead they are via data-id.
+  // lead they are via data-id. Rows not due yet do nothing when tapped.
   followupsListEl.addEventListener("click", (e) => {
-    const row = e.target.closest(".lead-row");
+    const row = e.target.closest(".lead-row.due");
     if (row) handleFollowupTap(row.dataset.id);
   });
   followupsDoneEl.addEventListener("click", (e) => {
@@ -314,7 +329,7 @@
   function handleFollowupTap(leadId) {
     const leads = getLeads();
     const lead = leads.find((l) => l.lead_id === leadId);
-    if (!lead) return;
+    if (!lead || !isDue(lead, todayStr())) return;
 
     const message = draftMessage(lead);
     const url = `https://wa.me/${lead.phone.replace("+", "")}?text=${encodeURIComponent(message)}`;

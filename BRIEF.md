@@ -62,12 +62,14 @@ Rows are separated by 1px hairlines, not cards.
 
 Leads are never removed from this list, so it grows (~1,000 a year at 5 visits a day). To keep it quick: row labels are computed without building the full WhatsApp message (that happens only on tap), the date formatter is created once, rows are built in a DocumentFragment and swapped in at once, one delegated click listener per list (rows carry `data-id`), and `content-visibility: auto` skips laying out off-screen rows. Measured at 6× CPU throttle (budget Android): 1,000 leads ≈ 45ms to show the list, 3,000 ≈ 100ms (about half what it was). Minifying was measured and skipped: stripping every comment saves ~3KB of compressed download, not worth the readability.
 
-**Tapping a row does three things in this order** (works the same whether the row is overdue, due today, or not yet due — tapping early is allowed, it simply sends the current stage's message early and advances the schedule from there):
+**A reminder can only be sent from its due date onward** — rows that are due today or overdue can be tapped; rows not yet due (e.g. the 2-day nudge on the day of the visit) are shown with a muted venue name and do nothing when tapped. (Changed from the original brief, which allowed tapping early.)
+
+**Tapping a due row does three things in this order:**
 1. Opens `https://wa.me/{phone}?text={encoded draft message}` in a new tab
 2. Advances that lead's reminder stage (see REMINDER SCHEDULE below) and recomputes `next_action_date`; sets `last_contacted` to today. These three fields (and only these — never `status` or anything else) are queued to the Sheet as a `kind: "update"` upload; undo queues the restored values the same way
 3. Moves the row to a "done" group at the bottom: faded grey, tick icon, still visible
 
-Done rows persist until local midnight. Tapping a done row **undoes** the push — restores the previous `reminder_stage`/`next_action_date`/`last_contacted`/`status` and returns it to the active list. This undo is important; don't skip it.
+Done rows persist until local midnight and read `"✓ 2-day nudge sent · tap to undo"` — the message that was sent, not the next one (showing the next stage's label made done rows look like a reminder waiting to go out). Tapping a done row **undoes** the push — restores the previous `reminder_stage`/`next_action_date`/`last_contacted`/`status` and returns it to the active list. This undo is important; don't skip it.
 
 Empty state: centred, muted — "No leads yet." (shown only when the phone has zero leads at all, since the list itself is now always-visible/never date-filtered).
 

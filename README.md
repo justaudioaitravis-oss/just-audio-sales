@@ -76,6 +76,11 @@ different repeat gap), save, and re-upload.
 Each visit resets this countdown — so if you visit the same venue again,
 the schedule starts over from that new visit date.
 
+A reminder can only be sent once its day arrives. Until then the lead still
+shows in Follow-ups (with its due date, venue name in grey) so you can see
+what's coming, but tapping it does nothing. Once it's due — or if it's
+overdue — tap it to send.
+
 ---
 
 ## 4. Changing the passcode
