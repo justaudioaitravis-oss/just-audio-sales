@@ -122,6 +122,8 @@ Never block submission on photos.
 
 Before upload, in a canvas: resize so the longest edge is max 1600px, export JPEG at quality 0.7. Convert to base64 for the POST. This is not optional — raw phone photos will fail on venue wifi.
 
+Implementation details (as built): the file is read via an object URL (not FileReader), and each photo produces two JPEGs — the 1600px upload and a 192px thumbnail used for the on-screen slot (showing the 1600px image in a 58px slot would hold ~8MB of decoded memory per photo). Canvases are zeroed after use (iPhone memory), and an out-of-memory `"data:,"` result counts as a failure. While any photo is compressing, Send is disabled and reads "Preparing photos…", so a photo can't be dropped or leak into the next visit's form. A photo that can't be decoded leaves the slot as it was with a red "Try again" caption, never blocking submission. Each slot tracks its newest attempt, so a slow earlier shot can't overwrite a quick retake.
+
 ---
 
 **DUPLICATE CHECK**
@@ -213,7 +215,7 @@ All nine templates should read warm, plain Indian English, no exclamation marks,
 
 The complete Google Apps Script lives in `apps-script.gs`:
 
-- `doPost` — append a new row, or update the existing row when `lead_id` is supplied. Accepts `kind: "lead"` (row only), `kind: "photo"` (one photo; skipped if its `photo_id` was already saved; links the venue folder into the row), and the first build's single all-in-one payload (row + `photos` list). Runs under a script lock. Always returns `{ok: true, v: 3}` or `{ok: false, error}`
+- `doPost` — append a new row, or update the existing row when `lead_id` is supplied. Accepts `kind: "lead"` (row only), `kind: "photo"` (one photo; skipped if its `photo_id` was already saved; links the venue folder into the row), and the first build's single all-in-one payload (row + `photos` list). Runs under a script lock (`tryLock(30000)`); if the lock can't be had, returns `{ok: false, busy: true}`, which the app treats like a network failure (retry shortly) rather than a refusal. Row lookups (`lead_id`, and `phone` in `doGet`) read only that one column, not the whole sheet. Always returns `{ok: true, v: 3}` or `{ok: false, error}`
 - `doPost` `kind: "update"` — Follow-ups tap/undo: writes only `reminder_stage`, `next_action_date`, `last_contacted`; `{ok: false}` if the row doesn't exist yet (app retries). Unknown `kind` values are refused
 - `doGet ?v=1` — returns `{ok: true, v: 3}` (API version check; the app needs v2+ before sending photos, v3+ before sending updates)
 - `doGet` — look up by phone, return the matching row as JSON, or `{found: false}`

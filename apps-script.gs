@@ -74,17 +74,11 @@ function doGet(e) {
     if (!phone) return jsonResponse_({ found: false });
 
     const sheet = getSheet_();
-    const data = sheet.getDataRange().getValues();
-    const phoneCol = COLUMNS.indexOf("phone");
     const wanted = last10Digits_(phone);
-
-    // Newest row first, in case the same number was ever added twice.
-    for (let i = data.length - 1; i >= 1; i--) {
-      if (last10Digits_(data[i][phoneCol]) === wanted) {
-        return jsonResponse_({ found: true, record: readRecord_(data[i]) });
-      }
-    }
-    return jsonResponse_({ found: false });
+    const rowNum = findRow_(sheet, "phone", (v) => last10Digits_(v) === wanted);
+    if (!rowNum) return jsonResponse_({ found: false });
+    const values = sheet.getRange(rowNum, 1, 1, COLUMNS.length).getValues()[0];
+    return jsonResponse_({ found: true, record: readRecord_(values) });
   } catch (err) {
     return jsonResponse_({ found: false, error: String(err) });
   }
@@ -105,13 +99,15 @@ function doGet(e) {
 // an upload from the phone's queue after it sees ok: true.
 //
 // A script lock makes simultaneous uploads (two reps at once) take turns,
-// so two uploads for the same lead can't both append a new row.
+// so two uploads for the same lead can't both append a new row. If the
+// Sheet stays busy for 30 seconds, the answer is { ok: false, busy: true }
+// and the app retries within a minute rather than treating it as refused.
 // ---------------------------------------------------------------------
 
 function doPost(e) {
   const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return jsonResponse_({ ok: false, busy: true, error: "Sheet busy" });
   try {
-    lock.waitLock(30000);
     const payload = JSON.parse(e.postData.contents);
     let result;
     if (payload.kind === "photo") {
@@ -175,14 +171,24 @@ function writeCell_(sheet, rowNum, col, value) {
   range.setValue(value);
 }
 
-// Returns the sheet row number (1-based) holding this lead_id, or 0.
-function findLeadRow_(sheet, leadId) {
-  const data = sheet.getDataRange().getValues();
-  const col = COLUMNS.indexOf("lead_id");
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][col]) === String(leadId)) return i + 1;
+// Returns the row number (1-based) of the newest row whose value in
+// column `col` passes `matches`, or 0 if none does. Reads only that one
+// column rather than the whole sheet, so lookups stay quick as the sheet
+// grows into thousands of rows.
+function findRow_(sheet, col, matches) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+  const values = sheet.getRange(2, COLUMNS.indexOf(col) + 1, lastRow - 1, 1).getValues();
+  for (let i = values.length - 1; i >= 0; i--) {
+    if (matches(values[i][0])) return i + 2;
   }
   return 0;
+}
+
+// Returns the row number (1-based) holding this lead_id, or 0.
+function findLeadRow_(sheet, leadId) {
+  const wanted = String(leadId);
+  return findRow_(sheet, "lead_id", (v) => String(v) === wanted);
 }
 
 // Writes the lead's row — updating it if the lead_id already exists,

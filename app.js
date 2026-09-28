@@ -360,6 +360,7 @@
   const addRoomBtn = document.getElementById("add-room-btn");
 
   let selectedEnquiry = "sales";
+  let photosProcessing = 0; // photos still being compressed; while above 0, Send waits ("Preparing photos…")
   let foundDupeRecord = null; // the Sheet's copy of this number's lead, if the duplicate check found one
 
   // Phone: allow spaces while typing, keep it visually grouped
@@ -376,6 +377,11 @@
   }
 
   function updateSubmitLabel() {
+    submitBtn.disabled = photosProcessing > 0;
+    if (photosProcessing > 0) {
+      submitBtn.textContent = "Preparing photos…";
+      return;
+    }
     const digits = currentPhoneDigits();
     const shown = digits.length === 10 ? digits.replace(/(\d{5})(\d{5})/, "$1 $2") : "98765 43210";
     submitBtn.textContent = `Send to +91 ${shown}`;
@@ -423,11 +429,23 @@
 
   // Photos: room-based, each room has its own set of labeled slots.
   // rooms[0] uses CONFIG.ROOM_ONE_LABELS; every room added after that uses
-  // CONFIG.EXTRA_ROOM_LABELS. Each room stores { label: dataUrl }.
+  // CONFIG.EXTRA_ROOM_LABELS. Per label, each room keeps:
+  //   photos  — the compressed photo that gets uploaded (up to 1600px)
+  //   thumbs  — a small copy for the on-screen thumbnail. Showing the full
+  //             photo in a 58px square would hold ~8MB of memory per photo,
+  //             enough to crash the page on a mid-range phone with 11 photos
+  //   failed  — true if the photo couldn't be read, so the slot says "Try again"
+  //   latest  — which attempt is newest, so a slow earlier shot can't
+  //             overwrite a quick retake
+  const THUMB_EDGE = 192;
   let rooms = [];
 
+  function newRoom(labels) {
+    return { labels, photos: {}, thumbs: {}, failed: {}, latest: {} };
+  }
+
   function resetRooms() {
-    rooms = [{ labels: CONFIG.ROOM_ONE_LABELS, photos: {} }];
+    rooms = [newRoom(CONFIG.ROOM_ONE_LABELS)];
     renderRooms();
   }
 
@@ -453,10 +471,10 @@
 
         const slot = document.createElement("div");
         slot.className = "photo-slot";
-        const existing = room.photos[label];
-        if (existing) {
+        const thumb = room.thumbs[label];
+        if (thumb) {
           const img = document.createElement("img");
-          img.src = existing;
+          img.src = thumb;
           slot.appendChild(img);
         }
 
@@ -464,12 +482,12 @@
         input.type = "file";
         input.accept = "image/*";
         input.capture = "environment";
-        input.addEventListener("change", () => handlePhotoChosen(roomIndex, label, input, slot));
+        input.addEventListener("change", () => handlePhotoChosen(room, label, input));
         slot.appendChild(input);
 
         const caption = document.createElement("div");
-        caption.className = "photo-cell-label";
-        caption.textContent = label;
+        caption.className = room.failed[label] ? "photo-cell-label error" : "photo-cell-label";
+        caption.textContent = room.failed[label] ? "Try again" : label;
 
         cell.appendChild(slot);
         cell.appendChild(caption);
@@ -482,41 +500,71 @@
   }
 
   addRoomBtn.addEventListener("click", () => {
-    rooms.push({ labels: CONFIG.EXTRA_ROOM_LABELS, photos: {} });
+    rooms.push(newRoom(CONFIG.EXTRA_ROOM_LABELS));
     renderRooms();
   });
 
-  function handlePhotoChosen(roomIndex, label, input, slot) {
+  function handlePhotoChosen(room, label, input) {
     const file = input.files && input.files[0];
+    input.value = ""; // so choosing the same photo again still registers
     if (!file) return;
-    compressImage(file, 1600, 0.7).then((dataUrl) => {
-      rooms[roomIndex].photos[label] = dataUrl;
-      let img = slot.querySelector("img");
-      if (!img) {
-        img = document.createElement("img");
-        slot.insertBefore(img, slot.firstChild);
-      }
-      img.src = dataUrl;
+
+    const attempt = (room.latest[label] || 0) + 1;
+    room.latest[label] = attempt;
+    photosProcessing += 1;
+    updateSubmitLabel();
+
+    compressImage(file, 1600, 0.7)
+      .then((result) => {
+        if (room.latest[label] !== attempt) return; // a newer retake replaced this one
+        room.photos[label] = result.full;
+        room.thumbs[label] = result.thumb;
+        delete room.failed[label];
+      }, () => {
+        // Couldn't read it (e.g. a format this phone can't open). The slot
+        // keeps any earlier photo and says "Try again"; never blocks Send.
+        if (room.latest[label] === attempt) room.failed[label] = true;
+      })
+      .then(() => {
+        photosProcessing -= 1;
+        updateSubmitLabel();
+        renderRooms();
+      });
+  }
+
+  // Resolves with { full, thumb } as JPEG data URLs, or rejects if the
+  // photo can't be read. Reads the file straight from disk (object URL)
+  // rather than copying it into a giant text string first.
+  function compressImage(file, maxEdge, quality) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        try {
+          resolve({ full: drawScaled(img, maxEdge, quality), thumb: drawScaled(img, THUMB_EDGE, 0.6) });
+        } catch (e) {
+          reject(e);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Photo could not be read"));
+      };
+      img.src = url;
     });
   }
 
-  function compressImage(file, maxEdge, quality) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      const reader = new FileReader();
-      reader.onload = (e) => { img.src = e.target.result; };
-      img.onload = () => {
-        let w = img.width, h = img.height;
-        if (w > h && w > maxEdge) { h = Math.round(h * (maxEdge / w)); w = maxEdge; }
-        else if (h >= w && h > maxEdge) { w = Math.round(w * (maxEdge / h)); h = maxEdge; }
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL("image/jpeg", quality));
-      };
-      reader.readAsDataURL(file);
-    });
+  function drawScaled(img, maxEdge, quality) {
+    const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL("image/jpeg", quality);
+    canvas.width = canvas.height = 0; // hand the memory back straight away (matters on iPhone)
+    if (dataUrl.length < 100) throw new Error("Photo too large to process"); // Safari returns "data:," when out of memory
+    return dataUrl;
   }
 
   function collectPhotosPayload() {
@@ -534,6 +582,7 @@
   // Submit
   newForm.addEventListener("submit", (e) => {
     e.preventDefault();
+    if (photosProcessing > 0) return; // a photo is still being prepared — Send is disabled until it's done
 
     const digits = currentPhoneDigits();
     if (digits.length !== 10) {
@@ -839,6 +888,8 @@
   //   "network"  — no signal, timeout, or a Google error page; stop for now
   //   "rejected" — the Apps Script answered but refused it; leave it queued
   //                and carry on with the rest of the queue
+  // A "busy" answer (the Sheet was tied up by other uploads) counts as
+  // "network": nothing wrong with the item, just try again shortly.
   function sendItem(item) {
     const minVersion = MIN_SERVER_VERSION[item.kind];
     const gate = minVersion ? checkServerVersion(minVersion) : Promise.resolve("ok");
@@ -852,7 +903,10 @@
         body: JSON.stringify(body)
       }, item.kind === "photo" ? PHOTO_TIMEOUT_MS : LEAD_TIMEOUT_MS)
         .then((r) => { if (!r.ok) throw new Error("bad status"); return r.json(); })
-        .then((data) => (data && data.ok === true ? "ok" : "rejected"), () => "network");
+        .then((data) => {
+          if (data && data.ok === true) return "ok";
+          return data && data.busy ? "network" : "rejected";
+        }, () => "network");
     });
   }
 

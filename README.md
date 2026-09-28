@@ -109,6 +109,15 @@ labels themselves, edit `ROOM_ONE_LABELS` and `EXTRA_ROOM_LABELS` in
 In the Google Drive folder, photos are organised as: **Just Audio - Lead
 Photos** → venue name → Room 1 / Room 2 / etc. → one file per label.
 
+After you take a photo, the Send button briefly says **"Preparing photos…"**
+while the photo is shrunk for upload (usually under a second). Send works
+again as soon as it's done — this just makes sure a photo you've taken is
+never left out.
+
+If a slot says **"Try again"** in red, the phone couldn't read that photo
+(rare — usually an unusual file format). Tap the slot and retake it, or
+just leave it; it never blocks sending.
+
 ---
 
 ## 6. Exporting the sheet to Excel
