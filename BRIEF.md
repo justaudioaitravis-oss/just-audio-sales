@@ -1,8 +1,14 @@
-
-
 **BRIEF — Just Audio field sales PWA**
 
 Build a lightweight Progressive Web App for field sales lead capture. I am not a developer — explain what you're doing in plain language and don't assume I can debug.
+
+> **STATUS (updated 28 Sep 2026): Built and deployed.** This file now describes the app as it actually is, not just as originally requested — read this before making further changes so nothing gets rebuilt or redeployed unnecessarily.
+>
+> - **Live app:** `https://justaudioaitravis-oss.github.io/just-audio-sales/`
+> - **GitHub repo:** `https://github.com/justaudioaitravis-oss/just-audio-sales` (public repo — GitHub Pages on the free tier requires this; see PASSCODE LOCK below for how confidentiality is handled instead)
+> - **Google Sheet:** tab named `Leads`, columns match the APPS SCRIPT section below
+> - **Apps Script:** deployed as a Web App, URL pasted into `config.js` → `APPS_SCRIPT_URL`. To ship a script change, edit `apps-script.gs`, paste into the Apps Script editor, then Deploy → Manage deployments → edit → **New version** → Deploy (the live URL does not change, so `config.js` never needs re-editing for a script-only change)
+> - Installed to home screen on the owner's phone, behind a passcode screen (see below)
 
 **Stack constraints (strict):** Plain HTML, CSS and vanilla JavaScript. No React, no Vue, no Tailwind, no npm packages, no build step, no bundler. Total payload under 50KB excluding photos. It must open in under one second on a mid-range Android phone on weak wifi.
 
@@ -16,6 +22,7 @@ manifest.json
 sw.js
 icons/ (192px and 512px PNG, generate simple ones)
 ```
+Plus `apps-script.gs` (Apps Script backend, kept in this same folder for reference — it isn't deployed via GitHub Pages, it's pasted into the Apps Script editor by hand) and `README.md` (end-user instructions).
 
 **Context:** Single-page app used on a phone from the home screen, in restaurants and bars in Goa. Often poor signal. Used one-handed while standing and talking to someone. Hosted on GitHub Pages. Data goes to a Google Sheet via Apps Script.
 
@@ -29,26 +36,52 @@ All touch targets minimum 44px tall. Respect `env(safe-area-inset-bottom)` so th
 
 ---
 
+**PASSCODE LOCK**
+
+Because GitHub Pages on the free tier can only serve public sites (there is no way to keep the repo private and still use Pages), a single full-screen passcode prompt is shown once per phone before anything else — including before the rep name prompt. Correct code unlocks the app permanently on that phone (stored in localStorage); wrong code shows an inline error, no `alert()`. The code lives in `config.js` → `PASSCODE` (default `1234` — change it).
+
+This is a soft deterrent, not real security — anyone who reads the app's public source code could find the passcode. It's meant to stop the link being casually stumbled on, not to protect sensitive data. If genuine access control is ever needed, the real fix is moving hosting to something like Cloudflare Pages + Cloudflare Access (free, email-verified login) — noted here for later, not currently built.
+
+---
+
 **TAB 1 — FOLLOW-UPS**
 
 Heading: "Follow-ups".
 
-Lists every lead where `next_action_date` is today or earlier, sorted most overdue first.
+Lists **every lead on this phone**, the moment a visit is logged for it — not only once its reminder is due. Sorted by `next_action_date` ascending (soonest/most-overdue first).
 
 Each row shows two lines:
 - Line 1: venue name, 18px, semibold
-- Line 2: which draft will be sent, 13px, muted — e.g. "3-day nudge", "Quote chase · 4 days late"
+- Line 2: which draft will be sent, 13px, muted, plus timing context:
+  - Overdue: `"2-day nudge · 3 days late"`
+  - Due today: `"1-week nudge"` (no extra suffix)
+  - Not yet due: `"2-week nudge · due 5 Oct"`
 
 Rows are separated by 1px hairlines, not cards.
 
-**Tapping a row does three things in this order:**
+**Tapping a row does three things in this order** (works the same whether the row is overdue, due today, or not yet due — tapping early is allowed, it simply sends the current stage's message early and advances the schedule from there):
 1. Opens `https://wa.me/{phone}?text={encoded draft message}` in a new tab
-2. Sets that lead's `next_action_date` to today + its `nudge_interval`, and `last_contacted` to today
+2. Advances that lead's reminder stage (see REMINDER SCHEDULE below) and recomputes `next_action_date`; sets `last_contacted` to today
 3. Moves the row to a "done" group at the bottom: faded grey, tick icon, still visible
 
-Done rows persist until local midnight. Tapping a done row **undoes** the push — restores the previous `next_action_date` and returns it to the active list. This undo is important; don't skip it.
+Done rows persist until local midnight. Tapping a done row **undoes** the push — restores the previous `reminder_stage`/`next_action_date`/`last_contacted`/`status` and returns it to the active list. This undo is important; don't skip it.
 
-Empty state: centred, muted — "Nothing due today."
+Empty state: centred, muted — "No leads yet." (shown only when the phone has zero leads at all, since the list itself is now always-visible/never date-filtered).
+
+---
+
+**REMINDER SCHEDULE (automatic — no manual "nudge interval" picker)**
+
+Every visit logged in New Entry (see below) resets a lead's reminder countdown to start counting from that visit's date (`schedule_anchor` = the visit date, `reminder_stage` = 0). The next few reminders fall due on a fixed cadence measured in days from that anchor date — **not** from whenever the previous reminder actually went out:
+
+- Reminder 1 (stage 0): `REMINDER_SCHEDULE_DAYS[0]` days after the visit — default **2 days**
+- Reminder 2 (stage 1): `REMINDER_SCHEDULE_DAYS[1]` days after the visit — default **1 week**
+- Reminder 3 (stage 2): `REMINDER_SCHEDULE_DAYS[2]` days after the visit — default **2 weeks**
+- Reminder 4 onward (stage 3+): repeats every `MONTHLY_INTERVAL_DAYS` days after that — default **monthly**
+
+Each stage has its own prewritten WhatsApp template (see config.js section below) — `nudge_2day`, `nudge_1week`, `nudge_2week`, `nudge_monthly` — the same way the very first contact message is prewritten per enquiry type. Tapping a Follow-ups row sends whichever template matches the lead's current stage, then advances to the next stage.
+
+If a lead's `status` has been manually set to `"quoted"` (there's no UI control for this yet — it would need to be edited directly in the Sheet, or a future UI added), the `quote_chase` template is used instead of the staged nudge, regardless of stage.
 
 ---
 
@@ -62,20 +95,23 @@ Heading: "New entry". Fields top to bottom:
 
 3. **Enquiry** — three chips, single select, default "Sales": Sales / Service / Acoustics. Selected chip is dark fill with light text.
 
-4. **Nudge again in** — small muted label above four chips, single select, default "3 days": Tomorrow / 3 days / 1 week / 1 month. Selected chip uses the accent colour. Labels must not wrap or truncate at 390px width — shrink font before you let them clip.
+4. **Photos** — labeled, room-based, not a flat row of five anymore:
+   - Room 1 has 5 slots, one per label, in this order: **Front wall, Left wall, Right wall, Back wall, Ceiling**.
+   - A **"+ Add another room"** button appends another room with 6 slots: **Front wall, Left wall, Right wall, Back wall, Ceiling, Overview**. Can be tapped repeatedly for as many rooms as needed.
+   - Labels live in `config.js` (`ROOM_ONE_LABELS`, `EXTRA_ROOM_LABELS`) so they can be changed without touching layout code.
+   - Each slot opens the camera via `<input type="file" accept="image/*" capture="environment">`. Filled slots show the thumbnail with the label underneath; empty slots show a dashed border. Tapping a filled slot offers retake. All photos optional, never block submission.
 
-5. **Photos** — a single row of five equal-width slots, 58px tall. All optional. Each opens the camera via `<input type="file" accept="image/*" capture="environment">`. Captured slots show the thumbnail; empty slots show a dashed border. Tapping a filled slot offers retake.
+5. **Note** — one full-width text input, placeholder "Note — zones, music, deadline". Plain text field so the phone keyboard's own dictation works. Do not build a recorder.
 
-6. **Note** — one full-width text input, placeholder "Note — zones, music, deadline". Plain text field so the phone keyboard's own dictation works. Do not build a recorder.
-
-7. **Submit button** — full width, green, pill-shaped, label reads `Send to +91 98765 43210` using the live value of the phone field.
+6. **Submit button** — full width, green, pill-shaped, label reads `Send to +91 98765 43210` using the live value of the phone field.
 
 **On submit, in this order:**
 1. Validate phone. Stop if invalid.
 2. Compress photos (below).
-3. POST to Apps Script.
-4. On success, or on queueing if offline, open WhatsApp with the pre-filled message.
-5. Reset the form and switch to the Follow-ups tab.
+3. Reset the reminder schedule for this lead: `schedule_anchor` = today, `reminder_stage` = 0, `next_action_date` = today + `REMINDER_SCHEDULE_DAYS[0]`, `last_contacted` = today.
+4. POST to Apps Script.
+5. On success, or on queueing if offline, open WhatsApp with the pre-filled first-contact message (`first_sales` / `first_service` / `first_acoustics`, matching the Enquiry chip).
+6. Reset the form and switch to the Follow-ups tab.
 
 Never block submission on photos.
 
@@ -94,7 +130,7 @@ When the phone field loses focus **and** contains 10 valid digits, GET the Apps 
 If a match exists, show one muted line directly below the field:
 `Priya · Anjuna Social · last contacted 12 Mar`
 
-Pre-fill name and venue from the record. On submit, update that lead's row rather than appending a new one. Silent failure if the lookup errors — never block the form on it.
+Pre-fill name and venue from the record. On submit, update that lead's row rather than appending a new one — this also means visiting an existing venue again resets its reminder schedule to start from today's new visit (see REMINDER SCHEDULE above), which is intentional: a fresh in-person conversation restarts the follow-up clock. Silent failure if the lookup errors — never block the form on it.
 
 ---
 
@@ -110,7 +146,7 @@ The queue must survive the app being closed. Test this path carefully — it is 
 
 **REP IDENTITY**
 
-On first open, show a single full-screen prompt: "Your name?" with one input and a Save button. Store in localStorage, write to the `rep` column on every row. No login, no accounts, no password. Build it so a future version can filter the Follow-ups list by rep.
+On first open (after the passcode screen), show a single full-screen prompt: "Your name?" with one input and a Save button. Store in localStorage, write to the `rep` column on every row. No login, no accounts, no password. Build it so a future version can filter the Follow-ups list by rep.
 
 ---
 
@@ -120,7 +156,10 @@ Every value I might change lives here and nowhere else. Comment each one in plai
 
 ```js
 const CONFIG = {
-  APPS_SCRIPT_URL: "PASTE_APPS_SCRIPT_URL_HERE",
+  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycby0FDcwHB7LoKkEqs1MaOE2JD7WDHg5nsArNaB6ZLxOWmn3IXLqrQiXtcvQuoI9eSVI/exec",
+
+  // Passcode lock screen — see PASSCODE LOCK section above.
+  PASSCODE: "1234",
 
   // Brochure links — one per enquiry type.
   // Set all three to the same URL if there is only one page.
@@ -132,21 +171,30 @@ const CONFIG = {
 
   COMPANY_NAME: "Just Audio",
 
-  NUDGE_DAYS: { tomorrow: 1, "3 days": 3, "1 week": 7, "1 month": 30 },
+  // See REMINDER SCHEDULE section above.
+  REMINDER_SCHEDULE_DAYS: [2, 7, 14],
+  MONTHLY_INTERVAL_DAYS: 30,
+
+  // See TAB 2 — NEW ENTRY, photos, above.
+  ROOM_ONE_LABELS: ["Front wall", "Left wall", "Right wall", "Back wall", "Ceiling"],
+  EXTRA_ROOM_LABELS: ["Front wall", "Left wall", "Right wall", "Back wall", "Ceiling", "Overview"],
 
   // {name} {venue} {brochure} {rep} {company} are replaced at send time
   TEMPLATES: {
     first_sales: "...",
     first_service: "...",
     first_acoustics: "...",
-    nudge: "...",
+    nudge_2day: "...",
+    nudge_1week: "...",
+    nudge_2week: "...",
+    nudge_monthly: "...",
     quote_chase: "...",
     survey_offer: "..."
   }
 };
 ```
 
-Write sensible first drafts of all six templates — warm, plain Indian English, no exclamation marks, no emoji, under 60 words. The sales one should promise a quote and offer a free site survey.
+All nine templates should read warm, plain Indian English, no exclamation marks, no emoji, under 60 words each. The `first_sales` one should promise a quote and offer a free site survey.
 
 **Critical:** when building the `wa.me` URL, encode the whole message with `encodeURIComponent`. Line breaks must be real `\n` in the template and must survive encoding as `%0A`. A message arriving as one unbroken paragraph is a bug.
 
@@ -154,18 +202,18 @@ Write sensible first drafts of all six templates — warm, plain Indian English,
 
 **APPS SCRIPT**
 
-Write the complete Google Apps Script too, in a separate file `apps-script.gs`:
+The complete Google Apps Script lives in `apps-script.gs`:
 
 - `doPost` — append a new row, or update the existing row when `lead_id` is supplied
 - `doGet` — look up by phone, return the matching row as JSON, or `{found: false}`
-- Photo handling — decode base64, save into a Drive folder named after the venue, create the folder if absent, write the folder URL into the row
+- Photo handling — decode base64, save into a Drive folder named after the venue (inside one root folder, `Just Audio - Lead Photos`), with a subfolder per room (`Room 1`, `Room 2`, ...), each photo filed under its label as the filename (e.g. `Front wall.jpg`); write the venue folder's URL into the row
 - CORS handled correctly for GitHub Pages
 - Return JSON always, never HTML
 
 **Sheet columns, in this exact order:**
-`lead_id` · `created_at` · `rep` · `phone` · `contact_name` · `venue` · `enquiry` · `visit_date` · `note` · `photo_folder` · `nudge_interval` · `next_action_date` · `last_contacted` · `status` · `source`
+`lead_id` · `created_at` · `rep` · `phone` · `contact_name` · `venue` · `enquiry` · `visit_date` · `note` · `photo_folder` · `reminder_stage` · `schedule_anchor` · `next_action_date` · `last_contacted` · `status` · `source`
 
-`lead_id` is a timestamp-based string. `phone` is always `+91XXXXXXXXXX`. Dates are `YYYY-MM-DD`. `status` starts as `new`. `source` is `visit` or `qr`.
+`lead_id` is a timestamp-based string. `phone` is always `+91XXXXXXXXXX`. Dates are `YYYY-MM-DD`. `reminder_stage` is an integer (0 = no reminders sent since the last visit yet). `schedule_anchor` is the visit date the reminder countdown resets from. `status` starts as `new` (manually settable to `quoted` to switch that lead's Follow-ups draft to the quote-chase template). `source` is `visit` or `qr`.
 
 ---
 
@@ -177,13 +225,12 @@ Hairline dividers, not cards. No shadows, no gradients, no icons except the tick
 
 ---
 
-**DELIVERY**
+**DELIVERY (completed)**
 
-1. Build all files.
-2. Start a local server and tell me the URL to open.
-3. Tell me how to switch my browser to phone view.
-4. `git init` and commit once it runs.
-5. **Then stop.** Walk me through deployment one step at a time — Google Sheet, Apps Script, GitHub Pages, adding to my home screen. Wait for me to confirm each step. Tell me exactly what to click. Assume I have never used any of these.
+1. Build all files. ✅
+2. Start a local server and tell me the URL to open. ✅
+3. Tell me how to switch my browser to phone view. ✅
+4. `git init` and commit once it runs. ✅
+5. Walk through deployment one step at a time — Google Sheet, Apps Script, GitHub Pages, adding to home screen — waiting for confirmation at each step. ✅ Done via GitHub Desktop (no CLI git credentials available in this environment).
 
-Also write `README.md` covering: how to change the brochure URLs, how to edit the message templates, how to export the sheet to Excel, and what to do if a submission doesn't appear.
-
+`README.md` covers: how to change the brochure URLs, how to edit the message templates, how to change the reminder schedule, how to change the passcode, how the photo rooms work, how to export the sheet to Excel, and what to do if a submission doesn't appear.
