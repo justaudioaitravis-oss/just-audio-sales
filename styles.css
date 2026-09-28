@@ -125,6 +125,10 @@ section.tab.active { display: block; }
   min-height: 60px;
   padding: 10px 20px;
   border-bottom: 1px solid var(--hairline);
+  /* Lets the browser skip laying out rows that are off-screen, which keeps
+     a long list quick. 60px is roughly one row's height. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 60px;
 }
 
 .lead-row .venue {

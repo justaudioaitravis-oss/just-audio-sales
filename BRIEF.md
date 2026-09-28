@@ -60,6 +60,8 @@ Each row shows two lines:
 
 Rows are separated by 1px hairlines, not cards.
 
+Leads are never removed from this list, so it grows (~1,000 a year at 5 visits a day). To keep it quick: row labels are computed without building the full WhatsApp message (that happens only on tap), the date formatter is created once, rows are built in a DocumentFragment and swapped in at once, one delegated click listener per list (rows carry `data-id`), and `content-visibility: auto` skips laying out off-screen rows. Measured at 6× CPU throttle (budget Android): 1,000 leads ≈ 45ms to show the list, 3,000 ≈ 100ms (about half what it was). Minifying was measured and skipped: stripping every comment saves ~3KB of compressed download, not worth the readability.
+
 **Tapping a row does three things in this order** (works the same whether the row is overdue, due today, or not yet due — tapping early is allowed, it simply sends the current stage's message early and advances the schedule from there):
 1. Opens `https://wa.me/{phone}?text={encoded draft message}` in a new tab
 2. Advances that lead's reminder stage (see REMINDER SCHEDULE below) and recomputes `next_action_date`; sets `last_contacted` to today. These three fields (and only these — never `status` or anything else) are queued to the Sheet as a `kind: "update"` upload; undo queues the restored values the same way

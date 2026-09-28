@@ -54,10 +54,13 @@
     return str.replace(/\{(\w+)\}/g, (_, key) => (vars[key] != null ? vars[key] : ""));
   }
 
+  // Made once and reused: toLocaleDateString builds a new formatter on
+  // every call, which adds up across a long Follow-ups list.
+  const DAY_MONTH = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" });
+
   function formatDateHuman(dateStr) {
     const [y, m, d] = dateStr.split("-").map(Number);
-    const dt = new Date(y, m - 1, d);
-    return dt.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+    return DAY_MONTH.format(new Date(y, m - 1, d));
   }
 
   // The automatic reminder cadence. Stage 0 is the first reminder after a
@@ -227,36 +230,45 @@
     return leads;
   }
 
-  function draftFor(lead) {
-    const today = todayStr();
+  // Which draft a lead's next follow-up uses: its label and template.
+  function draftKind(lead) {
+    if (lead.status === "quoted") return { kind: "Quote chase", template: CONFIG.TEMPLATES.quote_chase };
+    const info = stageInfo(lead.reminder_stage || 0);
+    return { kind: info.label, template: CONFIG.TEMPLATES[info.template] };
+  }
+
+  // Line 2 of a Follow-ups row, e.g. "2-day nudge · 3 days late".
+  function draftLabel(lead, today) {
+    const { kind } = draftKind(lead);
     const diff = daysBetween(lead.next_action_date, today); // >0 = overdue, <0 = upcoming
+    if (diff > 0) return `${kind} · ${diff} day${diff === 1 ? "" : "s"} late`;
+    if (diff < 0) return `${kind} · due ${formatDateHuman(lead.next_action_date)}`;
+    return kind;
+  }
 
-    let kind, template;
-    if (lead.status === "quoted") {
-      kind = "Quote chase";
-      template = CONFIG.TEMPLATES.quote_chase;
-    } else {
-      const info = stageInfo(lead.reminder_stage || 0);
-      kind = info.label;
-      template = CONFIG.TEMPLATES[info.template];
-    }
-
-    let label = kind;
-    if (diff > 0) {
-      label = `${kind} · ${diff} day${diff === 1 ? "" : "s"} late`;
-    } else if (diff < 0) {
-      label = `${kind} · due ${formatDateHuman(lead.next_action_date)}`;
-    }
-
-    const message = fillTemplate(template, {
+  // The full WhatsApp message — only built when a row is actually tapped.
+  function draftMessage(lead) {
+    return fillTemplate(draftKind(lead).template, {
       name: lead.contact_name,
       venue: lead.venue,
       brochure: (CONFIG.BROCHURE && CONFIG.BROCHURE[lead.enquiry]) || "",
       rep: lead.rep,
       company: CONFIG.COMPANY_NAME
     });
+  }
 
-    return { label, message };
+  function leadRowEl(lead, label, done) {
+    const li = document.createElement("li");
+    li.className = done ? "lead-row done" : "lead-row";
+    li.dataset.id = lead.lead_id;
+    const venue = document.createElement("div");
+    venue.className = "venue";
+    venue.textContent = lead.venue;
+    const line = document.createElement("div");
+    line.className = "draft-line";
+    line.textContent = label;
+    li.append(venue, line);
+    return li;
   }
 
   function renderFollowups() {
@@ -272,40 +284,39 @@
 
     const done = leads.filter((l) => l._doneAt === today);
 
-    followupsListEl.innerHTML = "";
-    active.forEach((lead) => {
-      const { label } = draftFor(lead);
-      const li = document.createElement("li");
-      li.className = "lead-row";
-      li.innerHTML = `<div class="venue"></div><div class="draft-line"></div>`;
-      li.querySelector(".venue").textContent = lead.venue;
-      li.querySelector(".draft-line").textContent = label;
-      li.addEventListener("click", () => handleFollowupTap(lead.lead_id));
-      followupsListEl.appendChild(li);
-    });
+    // Rows are built off-screen and swapped in at once, so the page only
+    // has to lay out the list one time however long it is.
+    const activeRows = document.createDocumentFragment();
+    active.forEach((lead) => activeRows.appendChild(leadRowEl(lead, draftLabel(lead, today), false)));
+    followupsListEl.textContent = "";
+    followupsListEl.appendChild(activeRows);
 
     followupsEmptyEl.classList.toggle("hidden", leads.length > 0);
 
-    followupsDoneEl.innerHTML = "";
-    done.forEach((lead) => {
-      const { label } = draftFor(lead);
-      const li = document.createElement("li");
-      li.className = "lead-row done";
-      li.innerHTML = `<div class="venue"></div><div class="draft-line"></div>`;
-      li.querySelector(".venue").textContent = lead.venue;
-      li.querySelector(".draft-line").textContent = label;
-      li.addEventListener("click", () => handleUndoTap(lead.lead_id));
-      followupsDoneEl.appendChild(li);
-    });
+    const doneRows = document.createDocumentFragment();
+    done.forEach((lead) => doneRows.appendChild(leadRowEl(lead, draftLabel(lead, today), true)));
+    followupsDoneEl.textContent = "";
+    followupsDoneEl.appendChild(doneRows);
     doneSectionEl.classList.toggle("hidden", done.length === 0);
   }
+
+  // One tap listener per list (rather than one per row) — rows say which
+  // lead they are via data-id.
+  followupsListEl.addEventListener("click", (e) => {
+    const row = e.target.closest(".lead-row");
+    if (row) handleFollowupTap(row.dataset.id);
+  });
+  followupsDoneEl.addEventListener("click", (e) => {
+    const row = e.target.closest(".lead-row");
+    if (row) handleUndoTap(row.dataset.id);
+  });
 
   function handleFollowupTap(leadId) {
     const leads = getLeads();
     const lead = leads.find((l) => l.lead_id === leadId);
     if (!lead) return;
 
-    const { message } = draftFor(lead);
+    const message = draftMessage(lead);
     const url = `https://wa.me/${lead.phone.replace("+", "")}?text=${encodeURIComponent(message)}`;
     window.open(url, "_blank");
 
