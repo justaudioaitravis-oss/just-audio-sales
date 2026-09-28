@@ -88,17 +88,28 @@
   // ---------------------------------------------------------------------
 
   const STORE_KEYS = {
-    unlocked: "ja_unlocked",
+    key: "ja_key",               // the passcode, once the Apps Script has accepted it
+    legacyUnlocked: "ja_unlocked", // older versions: "yes" once unlocked (no longer enough)
     rep: "ja_rep",
     leads: "ja_leads",
     queue: "ja_queue"
   };
 
-  function isUnlocked() {
-    return localStorage.getItem(STORE_KEYS.unlocked) === "yes";
+  // The passcode is checked by the Apps Script, not by this code (which is
+  // public). Once accepted it's kept on the phone and sent with every
+  // request — the script refuses anything without it.
+  function getKey() {
+    return localStorage.getItem(STORE_KEYS.key) || "";
   }
-  function setUnlocked() {
-    localStorage.setItem(STORE_KEYS.unlocked, "yes");
+  function setKey(passcode) {
+    localStorage.setItem(STORE_KEYS.key, passcode);
+    localStorage.removeItem(STORE_KEYS.legacyUnlocked);
+  }
+  function clearKey() {
+    localStorage.removeItem(STORE_KEYS.key);
+  }
+  function isUnlocked() {
+    return !!getKey();
   }
 
   function getRep() {
@@ -144,18 +155,71 @@
       initRepPrompt();
       return;
     }
+    showPasscodePrompt(initRepPrompt);
+  }
+
+  let afterUnlock = null;
+  function showPasscodePrompt(then) {
+    afterUnlock = then;
+    passcodeError.textContent = "";
     passcodePromptEl.classList.remove("hidden");
-    passcodeSaveBtn.addEventListener("click", () => {
-      if (passcodeInput.value === CONFIG.PASSCODE) {
-        setUnlocked();
-        passcodePromptEl.classList.add("hidden");
-        initRepPrompt();
-      } else {
-        passcodeError.textContent = "Incorrect passcode.";
-        passcodeInput.value = "";
-        passcodeInput.focus();
-      }
-    });
+  }
+
+  passcodeSaveBtn.addEventListener("click", tryUnlock);
+  passcodeInput.addEventListener("keydown", (e) => { if (e.key === "Enter") tryUnlock(); });
+
+  // Asks the Apps Script whether the passcode is right. Needs signal — the
+  // first unlock on a phone can't happen offline.
+  function tryUnlock() {
+    const code = passcodeInput.value;
+    if (!code || passcodeSaveBtn.disabled) { passcodeInput.focus(); return; }
+    passcodeSaveBtn.disabled = true;
+    passcodeSaveBtn.textContent = "Checking…";
+    passcodeError.textContent = "";
+    // The passcode check needs the current Apps Script (version 4+). An
+    // older one wouldn't understand the request.
+    checkServerVersion(MIN_SERVER_VERSION.verify)
+      .then((state) => {
+        if (state === "network") throw new Error("no signal");
+        if (state !== "ok") return { outdated: true };
+        return postToScript({ kind: "verify" }, code, LEAD_TIMEOUT_MS);
+      })
+      .then((data) => {
+        if (data && data.outdated) {
+          passcodeError.textContent = "The Apps Script needs updating first (see README).";
+        } else if (data && data.ok) {
+          setKey(code);
+          passcodeInput.value = "";
+          passcodePromptEl.classList.add("hidden");
+          const next = afterUnlock;
+          afterUnlock = null;
+          if (next) next();
+          drainQueue();
+        } else if (data && data.setup) {
+          passcodeError.textContent = "The passcode isn't set up in the Apps Script yet (see README).";
+        } else if (data && data.auth) {
+          passcodeError.textContent = "Incorrect passcode.";
+          passcodeInput.value = "";
+          passcodeInput.focus();
+        } else {
+          passcodeError.textContent = "Couldn't check the passcode. Try again.";
+        }
+      }, () => {
+        passcodeError.textContent = "No signal. The first unlock needs internet — try again with signal.";
+      })
+      .then(() => {
+        passcodeSaveBtn.disabled = false;
+        passcodeSaveBtn.textContent = "Unlock";
+      });
+  }
+
+  // The Apps Script refused the passcode saved on this phone (it has been
+  // changed). Forget it and ask for the new one. Anything waiting to send
+  // stays safely queued, and goes as soon as the new passcode is entered.
+  function relock() {
+    if (!isUnlocked()) return;
+    clearKey();
+    showPasscodePrompt(null);
   }
 
   // ---------------------------------------------------------------------
@@ -422,9 +486,11 @@
     if (!CONFIG.APPS_SCRIPT_URL || CONFIG.APPS_SCRIPT_URL.indexOf("PASTE_") === 0) return;
 
     const fullPhone = "+91" + digits;
-    fetch(`${CONFIG.APPS_SCRIPT_URL}?phone=${encodeURIComponent(fullPhone)}`)
-      .then((r) => r.json())
+    checkServerVersion(MIN_SERVER_VERSION.lookup)
+      .then((state) => (state === "ok" ? postToScript({ kind: "lookup", phone: fullPhone }, getKey(), LEAD_TIMEOUT_MS) : null))
       .then((data) => {
+        if (data && data.auth) { relock(); return; }
+        if (currentPhoneDigits() !== digits) return; // number changed while we were asking
         if (data && data.found && data.record) {
           const rec = data.record;
           foundDupeRecord = rec.lead_id ? Object.assign({}, rec, { lead_id: String(rec.lead_id) }) : null;
@@ -893,11 +959,12 @@
       .finally(() => clearTimeout(timer));
   }
 
-  // Before sending a photo or a follow-up update, check the Apps Script
-  // deployment is new enough to understand it. An older deployment would
-  // mistake either one for a whole lead and blank out the rest of that
-  // lead's row, so they wait in the queue until the new script is deployed.
-  const MIN_SERVER_VERSION = { photo: 2, update: 3 };
+  // Before sending a photo, a follow-up update, a passcode check or a
+  // duplicate-number lookup, check the Apps Script deployment is new enough
+  // to understand it. An older deployment could mistake it for a whole lead
+  // and write a blank or damaged row, so it waits until the new script is
+  // deployed.
+  const MIN_SERVER_VERSION = { photo: 2, update: 3, verify: 4, lookup: 4 };
   let serverVersion = 0;
   function checkServerVersion(min) {
     if (serverVersion >= min) return Promise.resolve("ok");
@@ -909,28 +976,42 @@
       }, () => "network");
   }
 
+  // POSTs to the Apps Script with the passcode added. Resolves with the
+  // script's JSON answer; rejects if there's no answer (no signal, timeout,
+  // or a Google error page). The passcode is added here, at send time — it
+  // is never stored inside queued items.
+  function postToScript(body, key, timeoutMs) {
+    return timedFetch(CONFIG.APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(Object.assign({}, body, { key }))
+    }, timeoutMs).then((r) => {
+      if (!r.ok) throw new Error("bad status");
+      return r.json();
+    });
+  }
+
   // Sends one queue item. Resolves with:
   //   "ok"       — the Apps Script saved it; safe to delete from the phone
   //   "network"  — no signal, timeout, or a Google error page; stop for now
   //   "rejected" — the Apps Script answered but refused it; leave it queued
   //                and carry on with the rest of the queue
+  // A wrong-passcode answer re-locks the app and counts as "network": the
+  // item waits until the new passcode is entered.
   // A "busy" answer (the Sheet was tied up by other uploads) counts as
   // "network": nothing wrong with the item, just try again shortly.
   function sendItem(item) {
+    if (!getKey()) return Promise.resolve("network"); // locked: wait until the passcode is entered
     const minVersion = MIN_SERVER_VERSION[item.kind];
     const gate = minVersion ? checkServerVersion(minVersion) : Promise.resolve("ok");
     return gate.then((state) => {
       if (state !== "ok") return state;
       const body = Object.assign({}, item);
       delete body.qid;
-      return timedFetch(CONFIG.APPS_SCRIPT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(body)
-      }, item.kind === "photo" ? PHOTO_TIMEOUT_MS : LEAD_TIMEOUT_MS)
-        .then((r) => { if (!r.ok) throw new Error("bad status"); return r.json(); })
+      return postToScript(body, getKey(), item.kind === "photo" ? PHOTO_TIMEOUT_MS : LEAD_TIMEOUT_MS)
         .then((data) => {
           if (data && data.ok === true) return "ok";
+          if (data && data.auth) { relock(); return "network"; }
           return data && data.busy ? "network" : "rejected";
         }, () => "network");
     });
@@ -964,7 +1045,7 @@
   let drainRequested = false;
 
   function drainQueue() {
-    if (!hasBackend()) return Promise.resolve();
+    if (!hasBackend() || !isUnlocked()) return Promise.resolve();
     if (draining) { drainRequested = true; return Promise.resolve(); }
     draining = true;
     drainRequested = false;

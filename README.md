@@ -85,19 +85,34 @@ overdue — tap it to send.
 
 ## 4. Changing the passcode
 
-The app is locked behind a simple passcode screen so the link isn't wide
-open to the public. In `config.js`:
+The passcode is **not** in the app's files — those are public on GitHub, so
+anything in them can be read by anyone. It's kept in the Apps Script's
+private settings instead, and the script refuses to read or write anything
+unless the request carries it.
 
-```js
-PASSCODE: "1234",
-```
+To set or change it:
 
-Change the value, save, and re-upload. Anyone who already unlocked the app
-on their phone won't be asked again (it only asks once per phone) — if you
-change the passcode, only new phones (or phones where someone clears their
-browser data) will be asked for the new one. This is a basic lock, not
-strong security — good enough to keep a private tool private, not something
-to rely on for sensitive information.
+1. Open the Apps Script editor (from the Google Sheet: **Extensions → Apps
+   Script**).
+2. Click the **gear icon** (Project Settings) in the left sidebar.
+3. Scroll to **Script Properties** → **Edit script properties**.
+4. Add (or edit) a property called `PASSCODE` with your passcode as the
+   value, then **Save script properties**.
+
+Rules and what to expect:
+
+- **At least 8 characters.** Shorter ones are refused (the app says the
+  passcode isn't set up), because a short code can be guessed. A few words
+  are easiest to type on a phone, e.g. `goa sound 2026`.
+- **No redeploy needed** — a change takes effect immediately.
+- **Every phone asks for the new one once**, the next time it talks to the
+  Sheet. Anything waiting to send is kept on the phone and goes as soon as
+  the new passcode is entered.
+- **The first unlock on a phone needs signal**, because the Sheet checks
+  the passcode. After that the app opens offline as usual.
+
+To lock someone out (e.g. a rep who has left), change the passcode and give
+the new one only to the people who should still have access.
 
 ---
 
@@ -178,7 +193,11 @@ how to check:
    photos are missing, check there — very large photos on a slow connection
    can occasionally take a little longer to finish uploading.
 
-5. **Check the Apps Script is the latest version.** Photos, and the
+5. **Check the passcode.** If a phone keeps showing the passcode screen, the
+   passcode was probably changed — enter the new one (see section 4).
+   Nothing waiting to send is lost meanwhile.
+
+6. **Check the Apps Script is the latest version.** Photos, and the
    updates sent when you tap a Follow-ups row, are only sent once the Apps
    Script deployment is new enough to understand them. If Sheet rows are
    arriving but photos or follow-up dates never change, and the badge stays

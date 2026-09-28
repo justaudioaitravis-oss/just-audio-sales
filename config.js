@@ -8,11 +8,9 @@ const CONFIG = {
   // It will look like: https://script.google.com/macros/s/AKfycb.../exec
   APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycby0FDcwHB7LoKkEqs1MaOE2JD7WDHg5nsArNaB6ZLxOWmn3IXLqrQiXtcvQuoI9eSVI/exec",
 
-  // A simple lock screen shown once per phone before the app can be used.
-  // This is NOT strong security — anyone who reads the app's code could
-  // find this value — but it stops casual/accidental access to a link
-  // that shouldn't be public. Change this to whatever you like.
-  PASSCODE: "1234",
+  // The passcode is NOT kept here: this file is public on GitHub. It lives
+  // in the Apps Script's private settings (Project Settings → Script
+  // Properties → PASSCODE) — see README, "Changing the passcode".
 
   // Brochure links — one per enquiry type. These are sent inside the
   // WhatsApp message so the customer can tap through to see products.

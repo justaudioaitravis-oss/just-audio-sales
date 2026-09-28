@@ -14,11 +14,21 @@
  * schedule_anchor — the date of the visit the reminder countdown resets
  *                    from (set fresh every time a visit is logged).
  *
- * doPost  — appends a new row, or updates the existing row if lead_id
- *           already exists in the sheet; also receives photos one at a
- *           time (see doPost below).
- * doGet   — looks up a lead by phone number, returns it as JSON, or
- *           { found: false } if there is no match.
+ * doPost  — everything the app does: checking the passcode, the
+ *           duplicate-number lookup, saving leads, photos and Follow-ups
+ *           updates (see doPost below).
+ * doGet   — only answers the version check (?v=1). It never returns data.
+ *
+ * PASSCODE — IMPORTANT
+ * The passcode is kept here, in the script's private settings, NOT in the
+ * app's code (which is public on GitHub). Every request from the app must
+ * carry it, or the script refuses to read or write anything.
+ * To set or change it: in the Apps Script editor, click the gear icon
+ * (Project Settings) → Script Properties → Add script property (or edit the
+ * existing one): Property = PASSCODE, Value = your passcode.
+ * It must be at least 8 characters — shorter ones are refused, because a
+ * short code can be guessed. Changing it takes effect immediately (no
+ * redeploy needed); each phone will ask for the new one once.
  */
 
 const SHEET_NAME = "Leads";
@@ -48,11 +58,28 @@ function jsonResponse_(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+const MIN_PASSCODE_LENGTH = 8;
+const WRONG_PASSCODE_DELAY_MS = 1500; // slows down anyone trying to guess it
+
+// Returns null if the request carries the right passcode, otherwise the
+// refusal to send back. A wrong passcode waits before answering, so the
+// passcode can't be guessed quickly.
+function checkPasscode_(key) {
+  const passcode = PropertiesService.getScriptProperties().getProperty("PASSCODE") || "";
+  if (passcode.length < MIN_PASSCODE_LENGTH) {
+    return { ok: false, auth: true, setup: true, error: "PASSCODE script property missing or under 8 characters" };
+  }
+  if (key === passcode) return null;
+  Utilities.sleep(WRONG_PASSCODE_DELAY_MS);
+  return { ok: false, auth: true, error: "Wrong passcode" };
+}
+
 // Bumped when the app and this script change how they talk to each other.
 // The app asks for this (?v=1) before sending photos (needs 2+) or
 // Follow-ups updates (needs 3+), so an out-of-date deployment can never
-// receive a kind of upload it doesn't understand.
-const API_VERSION = 3;
+// receive a kind of upload it doesn't understand. Version 4 added the
+// passcode check.
+const API_VERSION = 4;
 
 // Every cell is written as plain text except reminder_stage (a number).
 // Without this, Google Sheets "helpfully" converts values as they're
@@ -62,30 +89,21 @@ const API_VERSION = 3;
 const NUMBER_FORMATS = COLUMNS.map((col) => (col === "reminder_stage" ? "0" : "@"));
 
 // ---------------------------------------------------------------------
-// doGet — duplicate check by phone number: ?phone=+91XXXXXXXXXX
-//         version check: ?v=1
+// doGet — version check only: ?v=1. Needs no passcode and reveals nothing
+// about any lead. (The phone-number lookup used to be here, open to anyone
+// with the script's address — it is now a passcode-protected doPost.)
 // ---------------------------------------------------------------------
 
 function doGet(e) {
-  try {
-    if (e.parameter.v) return jsonResponse_({ ok: true, v: API_VERSION });
-
-    const phone = e.parameter.phone;
-    if (!phone) return jsonResponse_({ found: false });
-
-    const sheet = getSheet_();
-    const wanted = last10Digits_(phone);
-    const rowNum = findRow_(sheet, "phone", (v) => last10Digits_(v) === wanted);
-    if (!rowNum) return jsonResponse_({ found: false });
-    const values = sheet.getRange(rowNum, 1, 1, COLUMNS.length).getValues()[0];
-    return jsonResponse_({ found: true, record: readRecord_(values) });
-  } catch (err) {
-    return jsonResponse_({ found: false, error: String(err) });
-  }
+  if (e.parameter.v) return jsonResponse_({ ok: true, v: API_VERSION });
+  return jsonResponse_({ ok: false, error: "Not available" });
 }
 
 // ---------------------------------------------------------------------
-// doPost — the app sends each visit as small separate uploads:
+// doPost — every request carries { key: <passcode>, kind: ... }:
+//   { kind: "verify" }                passcode check (the lock screen)
+//   { kind: "lookup", phone }         duplicate-number check (New entry)
+// and the app sends each visit as small separate uploads:
 //   { kind: "lead", ...row fields }   create or update the lead's row
 //   { kind: "photo", lead_id, venue, photo_id, room, label, dataUrl }
 //                                     save one photo, link its folder
@@ -96,7 +114,9 @@ function doGet(e) {
 // "photos" list, no "kind") — that is still accepted.
 //
 // Always answers { ok: true } or { ok: false, error }. The app only removes
-// an upload from the phone's queue after it sees ok: true.
+// an upload from the phone's queue after it sees ok: true. A missing or
+// wrong passcode answers { ok: false, auth: true } and nothing is read or
+// written.
 //
 // A script lock makes simultaneous uploads (two reps at once) take turns,
 // so two uploads for the same lead can't both append a new row. If the
@@ -105,10 +125,21 @@ function doGet(e) {
 // ---------------------------------------------------------------------
 
 function doPost(e) {
+  let payload;
+  try {
+    payload = JSON.parse(e.postData.contents);
+  } catch (err) {
+    return jsonResponse_({ ok: false, error: "Bad request" });
+  }
+  const refusal = checkPasscode_(payload.key);
+  if (refusal) return jsonResponse_(refusal);
+
+  if (payload.kind === "verify") return jsonResponse_({ ok: true, v: API_VERSION });
+  if (payload.kind === "lookup") return jsonResponse_(lookupPhone_(payload.phone));
+
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) return jsonResponse_({ ok: false, busy: true, error: "Sheet busy" });
   try {
-    const payload = JSON.parse(e.postData.contents);
     let result;
     if (payload.kind === "photo") {
       result = savePhotoItem_(payload);
@@ -130,6 +161,26 @@ function doPost(e) {
     return jsonResponse_({ ok: false, error: String(err) });
   } finally {
     lock.releaseLock();
+  }
+}
+
+// Duplicate-number check. Returns only what the New entry form needs —
+// never the notes, photo folder, or anything else about the lead.
+const LOOKUP_FIELDS = ["lead_id", "created_at", "contact_name", "venue", "last_contacted", "status", "source"];
+
+function lookupPhone_(phone) {
+  try {
+    if (!phone) return { ok: true, found: false };
+    const sheet = getSheet_();
+    const wanted = last10Digits_(phone);
+    const rowNum = findRow_(sheet, "phone", (v) => last10Digits_(v) === wanted);
+    if (!rowNum) return { ok: true, found: false };
+    const full = readRecord_(sheet.getRange(rowNum, 1, 1, COLUMNS.length).getValues()[0]);
+    const record = {};
+    LOOKUP_FIELDS.forEach((col) => { record[col] = full[col]; });
+    return { ok: true, found: true, record: record };
+  } catch (err) {
+    return { ok: false, found: false, error: String(err) };
   }
 }
 

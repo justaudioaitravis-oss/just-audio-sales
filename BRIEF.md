@@ -5,7 +5,7 @@ Build a lightweight Progressive Web App for field sales lead capture. I am not a
 > **STATUS (updated 28 Sep 2026): Built and deployed.** This file now describes the app as it actually is, not just as originally requested — read this before making further changes so nothing gets rebuilt or redeployed unnecessarily.
 >
 > - **Live app:** `https://justaudioaitravis-oss.github.io/just-audio-sales/`
-> - **GitHub repo:** `https://github.com/justaudioaitravis-oss/just-audio-sales` (public repo — GitHub Pages on the free tier requires this; see PASSCODE LOCK below for how confidentiality is handled instead)
+> - **GitHub repo:** `https://github.com/justaudioaitravis-oss/just-audio-sales` (public repo — GitHub Pages on the free tier requires this, so nothing secret may ever go in it; see PASSCODE LOCK below)
 > - **Google Sheet:** tab named `Leads`, columns match the APPS SCRIPT section below
 > - **Apps Script:** deployed as a Web App, URL pasted into `config.js` → `APPS_SCRIPT_URL`. To ship a script change, edit `apps-script.gs`, paste into the Apps Script editor, then Deploy → Manage deployments → edit → **New version** → Deploy (the live URL does not change, so `config.js` never needs re-editing for a script-only change)
 > - Installed to home screen on the owner's phone, behind a passcode screen (see below)
@@ -39,9 +39,13 @@ All touch targets minimum 44px tall. Respect `env(safe-area-inset-bottom)` so th
 
 **PASSCODE LOCK**
 
-Because GitHub Pages on the free tier can only serve public sites (there is no way to keep the repo private and still use Pages), a single full-screen passcode prompt is shown once per phone before anything else — including before the rep name prompt. Correct code unlocks the app permanently on that phone (stored in localStorage); wrong code shows an inline error, no `alert()`. The code lives in `config.js` → `PASSCODE` (default `1234` — change it).
+Because GitHub Pages on the free tier can only serve public sites, everything in the repo — including `config.js` and the Apps Script URL — is public. So the passcode is **checked by the Apps Script, not the app**: it is stored in the script's Script Properties (`PASSCODE`), never in the repo, and every `doPost` must carry it as `key` or the script reads and writes nothing (`{ok: false, auth: true}`). A wrong passcode waits 1.5s before answering (slows guessing — Apps Script can't see who is calling, so per-caller lockouts aren't possible), and the script refuses to work at all if the stored passcode is missing or under 8 characters (`setup: true`).
 
-This is a soft deterrent, not real security — anyone who reads the app's public source code could find the passcode. It's meant to stop the link being casually stumbled on, not to protect sensitive data. If genuine access control is ever needed, the real fix is moving hosting to something like Cloudflare Pages + Cloudflare Access (free, email-verified login) — noted here for later, not currently built.
+The app shows a full-screen passcode prompt before anything else (including the rep name prompt) until the script accepts a passcode, then stores it in localStorage (`ja_key`) and sends it with every request — added at send time, never stored inside queued items. The first unlock needs signal; wrong code / no signal / script not set up / script too old each show their own inline message, no `alert()`. If the script ever answers `auth` (passcode changed), the app forgets the stored passcode and shows the prompt again over whatever is on screen (form contents are kept); queued uploads wait and go once the new passcode is entered. Phones unlocked by the first build's client-side check (`ja_unlocked`, code `1234` in public `config.js`) are asked once for the new passcode.
+
+`doGet` only answers `?v=1` (version check) and never returns lead data. The duplicate-number lookup is a passcode-protected `doPost` (`kind: "lookup"`) returning only `lead_id`, `created_at`, `contact_name`, `venue`, `last_contacted`, `status`, `source` — never notes, phone, rep or photo folder.
+
+Photos in Drive are private to the script owner by default; don't share the "Just Audio - Lead Photos" folder publicly. If per-person logins are ever needed (rather than one shared passcode), the upgrade is hosting on Cloudflare Pages + Cloudflare Access (free, email-verified login).
 
 ---
 
@@ -173,8 +177,8 @@ Every value I might change lives here and nowhere else. Comment each one in plai
 const CONFIG = {
   APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycby0FDcwHB7LoKkEqs1MaOE2JD7WDHg5nsArNaB6ZLxOWmn3IXLqrQiXtcvQuoI9eSVI/exec",
 
-  // Passcode lock screen — see PASSCODE LOCK section above.
-  PASSCODE: "1234",
+  // (No PASSCODE here — it lives in the Apps Script's Script Properties;
+  //  see PASSCODE LOCK above. This file is public.)
 
   // Brochure links — one per enquiry type.
   // Set all three to the same URL if there is only one page.
@@ -219,10 +223,9 @@ All nine templates should read warm, plain Indian English, no exclamation marks,
 
 The complete Google Apps Script lives in `apps-script.gs`:
 
-- `doPost` — append a new row, or update the existing row when `lead_id` is supplied. Accepts `kind: "lead"` (row only), `kind: "photo"` (one photo; skipped if its `photo_id` was already saved; links the venue folder into the row), and the first build's single all-in-one payload (row + `photos` list). Runs under a script lock (`tryLock(30000)`); if the lock can't be had, returns `{ok: false, busy: true}`, which the app treats like a network failure (retry shortly) rather than a refusal. Row lookups (`lead_id`, and `phone` in `doGet`) read only that one column, not the whole sheet. Always returns `{ok: true, v: 3}` or `{ok: false, error}`
+- `doPost` — append a new row, or update the existing row when `lead_id` is supplied. Accepts `kind: "lead"` (row only), `kind: "photo"` (one photo; skipped if its `photo_id` was already saved; links the venue folder into the row), and the first build's single all-in-one payload (row + `photos` list). Runs under a script lock (`tryLock(30000)`); if the lock can't be had, returns `{ok: false, busy: true}`, which the app treats like a network failure (retry shortly) rather than a refusal. Row lookups (`lead_id`, and `phone` for the duplicate check) read only that one column, not the whole sheet. Requires the passcode (`key`) — see PASSCODE LOCK. Also handles `kind: "verify"` (passcode check) and `kind: "lookup"` (duplicate check). Always returns `{ok: true, v: 4}` or `{ok: false, error}`
 - `doPost` `kind: "update"` — Follow-ups tap/undo: writes only `reminder_stage`, `next_action_date`, `last_contacted`; `{ok: false}` if the row doesn't exist yet (app retries). Unknown `kind` values are refused
-- `doGet ?v=1` — returns `{ok: true, v: 3}` (API version check; the app needs v2+ before sending photos, v3+ before sending updates)
-- `doGet` — look up by phone, return the matching row as JSON, or `{found: false}`
+- `doGet ?v=1` — returns `{ok: true, v: 4}` (API version check; the app needs v2+ before sending photos, v3+ before sending updates, v4+ before a passcode check or lookup). `doGet` returns nothing else.
 - Photo handling — decode base64, save into a Drive folder named after the venue (inside one root folder, `Just Audio - Lead Photos`), with a subfolder per room (`Room 1`, `Room 2`, ...), each photo filed under its label as the filename (e.g. `Front wall.jpg`); write the venue folder's URL into the row
 - CORS handled correctly for GitHub Pages
 - Return JSON always, never HTML
@@ -232,7 +235,7 @@ The complete Google Apps Script lives in `apps-script.gs`:
 
 `lead_id` is a timestamp-based string. `phone` is always `+91XXXXXXXXXX`. Dates are `YYYY-MM-DD`. `reminder_stage` is an integer (0 = no reminders sent since the last visit yet). `schedule_anchor` is the visit date the reminder countdown resets from. `status` starts as `new` (manually settable to `quoted` to switch that lead's Follow-ups draft to the quote-chase template). `source` is `visit` or `qr`.
 
-Every cell is written as **plain text** (number format `@`) except `reminder_stage` — otherwise Google Sheets converts values on write (`+91…` → a number, dates → date objects, notes starting `=`/`+` → formulas), which broke the duplicate check. `doGet` also normalises rows written before this fix (numeric phones/lead_ids, Date cells) back to the formats above, matches phones on their last 10 digits, and returns the newest matching row.
+Every cell is written as **plain text** (number format `@`) except `reminder_stage` — otherwise Google Sheets converts values on write (`+91…` → a number, dates → date objects, notes starting `=`/`+` → formulas), which broke the duplicate check. The duplicate lookup also normalises rows written before this fix (numeric phones/lead_ids, Date cells) back to the formats above, matches phones on their last 10 digits, and returns the newest matching row.
 
 ---
 
