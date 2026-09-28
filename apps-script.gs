@@ -49,10 +49,17 @@ function jsonResponse_(obj) {
 }
 
 // Bumped when the app and this script change how they talk to each other.
-// The app asks for this (?v=1) before sending photos one at a time, so an
-// out-of-date deployment can never receive a kind of upload it doesn't
-// understand.
-const API_VERSION = 2;
+// The app asks for this (?v=1) before sending photos (needs 2+) or
+// Follow-ups updates (needs 3+), so an out-of-date deployment can never
+// receive a kind of upload it doesn't understand.
+const API_VERSION = 3;
+
+// Every cell is written as plain text except reminder_stage (a number).
+// Without this, Google Sheets "helpfully" converts values as they're
+// written: +919876543210 becomes the number 919876543210, 2026-09-28
+// becomes a date, and a note starting with = or + becomes a formula —
+// which breaks the duplicate check and garbles what the app reads back.
+const NUMBER_FORMATS = COLUMNS.map((col) => (col === "reminder_stage" ? "0" : "@"));
 
 // ---------------------------------------------------------------------
 // doGet — duplicate check by phone number: ?phone=+91XXXXXXXXXX
@@ -69,12 +76,12 @@ function doGet(e) {
     const sheet = getSheet_();
     const data = sheet.getDataRange().getValues();
     const phoneCol = COLUMNS.indexOf("phone");
+    const wanted = last10Digits_(phone);
 
-    for (let i = 1; i < data.length; i++) {
-      if (String(data[i][phoneCol]) === phone) {
-        const record = {};
-        COLUMNS.forEach((col, idx) => { record[col] = data[i][idx]; });
-        return jsonResponse_({ found: true, record: record });
+    // Newest row first, in case the same number was ever added twice.
+    for (let i = data.length - 1; i >= 1; i--) {
+      if (last10Digits_(data[i][phoneCol]) === wanted) {
+        return jsonResponse_({ found: true, record: readRecord_(data[i]) });
       }
     }
     return jsonResponse_({ found: false });
@@ -88,6 +95,9 @@ function doGet(e) {
 //   { kind: "lead", ...row fields }   create or update the lead's row
 //   { kind: "photo", lead_id, venue, photo_id, room, label, dataUrl }
 //                                     save one photo, link its folder
+//   { kind: "update", lead_id, reminder_stage, next_action_date,
+//     last_contacted }                a Follow-ups tap (or undo): changes
+//                                     only those three cells
 // Older versions of the app sent everything in one go (row fields plus a
 // "photos" list, no "kind") — that is still accepted.
 //
@@ -106,6 +116,10 @@ function doPost(e) {
     let result;
     if (payload.kind === "photo") {
       result = savePhotoItem_(payload);
+    } else if (payload.kind === "update") {
+      result = updateFollowup_(payload);
+    } else if (payload.kind && payload.kind !== "lead") {
+      throw new Error("Unknown upload kind: " + payload.kind);
     } else {
       let photoFolderUrl = "";
       if (payload.photos && payload.photos.length > 0) {
@@ -121,6 +135,44 @@ function doPost(e) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// Compares phone numbers however the cell stored them: "+919876543210",
+// the number 919876543210 (older rows written before plain-text cells),
+// or with spaces.
+function last10Digits_(value) {
+  return String(value).replace(/\D/g, "").slice(-10);
+}
+
+// Turns a sheet row into the record the app expects: dates as
+// YYYY-MM-DD, phone as +91XXXXXXXXXX, lead_id as text — including rows
+// written before cells were plain text, where Sheets converted them.
+function readRecord_(values) {
+  const tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  const record = {};
+  COLUMNS.forEach((col, idx) => {
+    let v = values[idx];
+    if (v instanceof Date) v = Utilities.formatDate(v, tz, "yyyy-MM-dd");
+    else if (col === "phone" && v !== "") v = "+91" + last10Digits_(v);
+    else if (col === "reminder_stage") v = Number(v) || 0;
+    else v = String(v);
+    record[col] = v;
+  });
+  return record;
+}
+
+// Writes a whole lead row as plain text (see NUMBER_FORMATS above).
+function writeRow_(sheet, rowNum, row) {
+  const range = sheet.getRange(rowNum, 1, 1, COLUMNS.length);
+  range.setNumberFormats([NUMBER_FORMATS]);
+  range.setValues([row]);
+}
+
+// Writes one cell of a lead's row, in that column's format.
+function writeCell_(sheet, rowNum, col, value) {
+  const range = sheet.getRange(rowNum, COLUMNS.indexOf(col) + 1);
+  range.setNumberFormat(NUMBER_FORMATS[COLUMNS.indexOf(col)]);
+  range.setValue(value);
 }
 
 // Returns the sheet row number (1-based) holding this lead_id, or 0.
@@ -147,11 +199,25 @@ function upsertLead_(payload, photoFolderUrl) {
   const rowNum = findLeadRow_(sheet, payload.lead_id);
   if (rowNum) {
     if (!photoFolderUrl) row[folderCol] = sheet.getRange(rowNum, folderCol + 1).getValue();
-    sheet.getRange(rowNum, 1, 1, COLUMNS.length).setValues([row]);
+    writeRow_(sheet, rowNum, row);
   } else {
-    sheet.appendRow(row);
+    writeRow_(sheet, sheet.getLastRow() + 1, row);
   }
   return { updated: !!rowNum, photo_folder: row[folderCol] };
+}
+
+// A Follow-ups tap or undo. Only the reminder cells change, so a status
+// set by hand in the Sheet, or a newer visit from another phone, is never
+// overwritten. If the lead's row isn't in the Sheet yet this fails, and
+// the app keeps the update and tries again later.
+function updateFollowup_(payload) {
+  const sheet = getSheet_();
+  const rowNum = findLeadRow_(sheet, payload.lead_id);
+  if (!rowNum) throw new Error("No row for lead_id " + payload.lead_id);
+  ["reminder_stage", "next_action_date", "last_contacted"].forEach((col) => {
+    writeCell_(sheet, rowNum, col, payload[col]);
+  });
+  return { updated: true };
 }
 
 // Saves one photo and writes its venue folder link into the lead's row.
@@ -175,7 +241,7 @@ function savePhotoItem_(photo) {
   const folderUrl = venueFolder.getUrl();
   const sheet = getSheet_();
   const rowNum = findLeadRow_(sheet, photo.lead_id);
-  if (rowNum) sheet.getRange(rowNum, COLUMNS.indexOf("photo_folder") + 1).setValue(folderUrl);
+  if (rowNum) writeCell_(sheet, rowNum, "photo_folder", folderUrl);
 
   return { duplicate: duplicate, photo_folder: folderUrl };
 }

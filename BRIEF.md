@@ -62,7 +62,7 @@ Rows are separated by 1px hairlines, not cards.
 
 **Tapping a row does three things in this order** (works the same whether the row is overdue, due today, or not yet due — tapping early is allowed, it simply sends the current stage's message early and advances the schedule from there):
 1. Opens `https://wa.me/{phone}?text={encoded draft message}` in a new tab
-2. Advances that lead's reminder stage (see REMINDER SCHEDULE below) and recomputes `next_action_date`; sets `last_contacted` to today
+2. Advances that lead's reminder stage (see REMINDER SCHEDULE below) and recomputes `next_action_date`; sets `last_contacted` to today. These three fields (and only these — never `status` or anything else) are queued to the Sheet as a `kind: "update"` upload; undo queues the restored values the same way
 3. Moves the row to a "done" group at the bottom: faded grey, tick icon, still visible
 
 Done rows persist until local midnight. Tapping a done row **undoes** the push — restores the previous `reminder_stage`/`next_action_date`/`last_contacted`/`status` and returns it to the active list. This undo is important; don't skip it.
@@ -132,6 +132,8 @@ If a match exists, show one muted line directly below the field:
 `Priya · Anjuna Social · last contacted 12 Mar`
 
 Pre-fill name and venue from the record. On submit, update that lead's row rather than appending a new one — this also means visiting an existing venue again resets its reminder schedule to start from today's new visit (see REMINDER SCHEDULE above), which is intentional: a fresh in-person conversation restarts the follow-up clock. Silent failure if the lookup errors — never block the form on it.
+
+If the number is in the Sheet but not on this phone (logged by another rep/phone), the phone adopts that row's `lead_id`, `created_at`, `status` and `source`, so the visit updates the existing row. A `status` found in the Sheet (e.g. `quoted`, set by hand) is always kept, never reset to `new`. If the lookup couldn't run (no signal), the phone falls back to its own lead with the same number, so an offline revisit still doesn't create a duplicate.
 
 ---
 
@@ -209,8 +211,9 @@ All nine templates should read warm, plain Indian English, no exclamation marks,
 
 The complete Google Apps Script lives in `apps-script.gs`:
 
-- `doPost` — append a new row, or update the existing row when `lead_id` is supplied. Accepts `kind: "lead"` (row only), `kind: "photo"` (one photo; skipped if its `photo_id` was already saved; links the venue folder into the row), and the first build's single all-in-one payload (row + `photos` list). Runs under a script lock. Always returns `{ok: true, v: 2}` or `{ok: false, error}`
-- `doGet ?v=1` — returns `{ok: true, v: 2}` (API version check)
+- `doPost` — append a new row, or update the existing row when `lead_id` is supplied. Accepts `kind: "lead"` (row only), `kind: "photo"` (one photo; skipped if its `photo_id` was already saved; links the venue folder into the row), and the first build's single all-in-one payload (row + `photos` list). Runs under a script lock. Always returns `{ok: true, v: 3}` or `{ok: false, error}`
+- `doPost` `kind: "update"` — Follow-ups tap/undo: writes only `reminder_stage`, `next_action_date`, `last_contacted`; `{ok: false}` if the row doesn't exist yet (app retries). Unknown `kind` values are refused
+- `doGet ?v=1` — returns `{ok: true, v: 3}` (API version check; the app needs v2+ before sending photos, v3+ before sending updates)
 - `doGet` — look up by phone, return the matching row as JSON, or `{found: false}`
 - Photo handling — decode base64, save into a Drive folder named after the venue (inside one root folder, `Just Audio - Lead Photos`), with a subfolder per room (`Room 1`, `Room 2`, ...), each photo filed under its label as the filename (e.g. `Front wall.jpg`); write the venue folder's URL into the row
 - CORS handled correctly for GitHub Pages
@@ -220,6 +223,8 @@ The complete Google Apps Script lives in `apps-script.gs`:
 `lead_id` · `created_at` · `rep` · `phone` · `contact_name` · `venue` · `enquiry` · `visit_date` · `note` · `photo_folder` · `reminder_stage` · `schedule_anchor` · `next_action_date` · `last_contacted` · `status` · `source`
 
 `lead_id` is a timestamp-based string. `phone` is always `+91XXXXXXXXXX`. Dates are `YYYY-MM-DD`. `reminder_stage` is an integer (0 = no reminders sent since the last visit yet). `schedule_anchor` is the visit date the reminder countdown resets from. `status` starts as `new` (manually settable to `quoted` to switch that lead's Follow-ups draft to the quote-chase template). `source` is `visit` or `qr`.
+
+Every cell is written as **plain text** (number format `@`) except `reminder_stage` — otherwise Google Sheets converts values on write (`+91…` → a number, dates → date objects, notes starting `=`/`+` → formulas), which broke the duplicate check. `doGet` also normalises rows written before this fix (numeric phones/lead_ids, Date cells) back to the formats above, matches phones on their last 10 digits, and returns the newest matching row.
 
 ---
 

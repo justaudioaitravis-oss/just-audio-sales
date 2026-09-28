@@ -322,6 +322,7 @@
     lead._doneAt = today;
 
     saveLeads(leads);
+    queueFollowupUpdate(lead);
     renderFollowups();
   }
 
@@ -338,6 +339,7 @@
     delete lead._prevState;
 
     saveLeads(leads);
+    queueFollowupUpdate(lead);
     renderFollowups();
   }
 
@@ -358,7 +360,7 @@
   const addRoomBtn = document.getElementById("add-room-btn");
 
   let selectedEnquiry = "sales";
-  let foundDupeLeadId = null;
+  let foundDupeRecord = null; // the Sheet's copy of this number's lead, if the duplicate check found one
 
   // Phone: allow spaces while typing, keep it visually grouped
   phoneInput.addEventListener("input", () => {
@@ -383,7 +385,7 @@
   phoneInput.addEventListener("blur", () => {
     const digits = currentPhoneDigits();
     dupeLine.classList.add("hidden");
-    foundDupeLeadId = null;
+    foundDupeRecord = null;
     if (digits.length !== 10) return;
     if (!CONFIG.APPS_SCRIPT_URL || CONFIG.APPS_SCRIPT_URL.indexOf("PASTE_") === 0) return;
 
@@ -393,10 +395,10 @@
       .then((data) => {
         if (data && data.found && data.record) {
           const rec = data.record;
-          foundDupeLeadId = rec.lead_id || null;
+          foundDupeRecord = rec.lead_id ? Object.assign({}, rec, { lead_id: String(rec.lead_id) }) : null;
           contactNameInput.value = rec.contact_name || "";
           venueInput.value = rec.venue || "";
-          const lastContacted = rec.last_contacted ? formatDateHuman(rec.last_contacted) : "—";
+          const lastContacted = /^\d{4}-\d{2}-\d{2}$/.test(rec.last_contacted) ? formatDateHuman(rec.last_contacted) : "—";
           dupeLine.textContent = `${rec.contact_name || ""} · ${rec.venue || ""} · last contacted ${lastContacted}`;
           dupeLine.classList.remove("hidden");
         }
@@ -546,10 +548,32 @@
     const rep = getRep();
 
     const leads = getLeads();
-    let lead = foundDupeLeadId ? leads.find((l) => l.lead_id === foundDupeLeadId) : null;
-    const isNew = !lead;
+    const rec = foundDupeRecord;
+    // Revisit? Match the Sheet's lead if the duplicate check found one,
+    // otherwise (e.g. no signal for the check) this phone's own lead for
+    // the same number.
+    let lead = rec
+      ? leads.find((l) => l.lead_id === rec.lead_id)
+      : leads.find((l) => l.phone === fullPhone);
 
-    if (isNew) {
+    if (!lead && rec) {
+      // This number is already in the Sheet but not on this phone (first
+      // logged by another rep, or on another phone). Take over its lead_id
+      // so this visit updates that row instead of adding a duplicate.
+      lead = {
+        lead_id: rec.lead_id,
+        created_at: rec.created_at || today,
+        status: rec.status || "new",
+        source: rec.source || "visit"
+      };
+      leads.push(lead);
+    } else if (lead && rec && rec.status) {
+      // Pick up a status set by hand in the Sheet (e.g. "quoted"), so this
+      // visit doesn't overwrite it.
+      lead.status = rec.status;
+    }
+
+    if (!lead) {
       lead = {
         lead_id: String(Date.now()),
         created_at: today,
@@ -619,7 +643,7 @@
     phoneError.textContent = "";
     phoneRow.classList.remove("error");
     dupeLine.classList.add("hidden");
-    foundDupeLeadId = null;
+    foundDupeRecord = null;
     resetRooms();
     updateSubmitLabel();
     document.querySelectorAll("#enquiry-chips .chip").forEach((c) => c.classList.toggle("selected-dark", c.dataset.value === "sales"));
@@ -748,7 +772,24 @@
   }
 
   function queueLead(payload) {
-    const items = splitSubmission(payload);
+    queueItems(splitSubmission(payload));
+  }
+
+  // A tap (or undo) on a Follow-ups row changes only the reminder fields;
+  // this sends just those, so it can't overwrite anything newer in the
+  // Sheet — like a later visit logged on another phone, or a status set
+  // there by hand.
+  function queueFollowupUpdate(lead) {
+    queueItems([{
+      kind: "update",
+      lead_id: lead.lead_id,
+      reminder_stage: lead.reminder_stage,
+      next_action_date: lead.next_action_date,
+      last_contacted: lead.last_contacted
+    }]);
+  }
+
+  function queueItems(items) {
     idbStore.add(items)
       .catch(() => memStore.add(items))
       .then(() => { renderQueueBadge(); drainQueue(); });
@@ -777,18 +818,19 @@
       .finally(() => clearTimeout(timer));
   }
 
-  // Before sending any photo, check the Apps Script deployment is the
-  // version that understands one-photo-at-a-time uploads. An older
-  // deployment would mistake a photo for a lead and blank out that lead's
-  // row, so photos wait in the queue until the new script is deployed.
-  let serverSupportsPhotoItems = false;
-  function checkServerVersion() {
-    if (serverSupportsPhotoItems) return Promise.resolve("ok");
+  // Before sending a photo or a follow-up update, check the Apps Script
+  // deployment is new enough to understand it. An older deployment would
+  // mistake either one for a whole lead and blank out the rest of that
+  // lead's row, so they wait in the queue until the new script is deployed.
+  const MIN_SERVER_VERSION = { photo: 2, update: 3 };
+  let serverVersion = 0;
+  function checkServerVersion(min) {
+    if (serverVersion >= min) return Promise.resolve("ok");
     return timedFetch(`${CONFIG.APPS_SCRIPT_URL}?v=1`, {}, LEAD_TIMEOUT_MS)
       .then((r) => r.json())
       .then((data) => {
-        if (data && data.v >= 2) { serverSupportsPhotoItems = true; return "ok"; }
-        return "rejected";
+        serverVersion = (data && data.v) || 1;
+        return serverVersion >= min ? "ok" : "rejected";
       }, () => "network");
   }
 
@@ -798,7 +840,8 @@
   //   "rejected" — the Apps Script answered but refused it; leave it queued
   //                and carry on with the rest of the queue
   function sendItem(item) {
-    const gate = item.kind === "photo" ? checkServerVersion() : Promise.resolve("ok");
+    const minVersion = MIN_SERVER_VERSION[item.kind];
+    const gate = minVersion ? checkServerVersion(minVersion) : Promise.resolve("ok");
     return gate.then((state) => {
       if (state !== "ok") return state;
       const body = Object.assign({}, item);

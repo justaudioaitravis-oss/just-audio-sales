@@ -113,6 +113,11 @@ Photos** → venue name → Room 1 / Room 2 / etc. → one file per label.
 
 ## 6. Exporting the sheet to Excel
 
+(Note: the app saves every cell as plain text, except `reminder_stage`, so
+phone numbers keep their `+91` and dates stay as `2026-09-28`. Rows saved
+before this was added may show phone numbers without the `+` — that's
+harmless, the app still recognises them.)
+
 1. Open the Google Sheet in your browser.
 2. Go to **File > Download**.
 3. Choose **Microsoft Excel (.xlsx)**.
@@ -159,9 +164,10 @@ how to check:
    photos are missing, check there — very large photos on a slow connection
    can occasionally take a little longer to finish uploading.
 
-5. **Check the Apps Script is the latest version.** Photos are only sent
-   once the Apps Script deployment understands one-photo-at-a-time uploads.
-   If the Sheet rows are arriving but photos never do, and the badge stays
+5. **Check the Apps Script is the latest version.** Photos, and the
+   updates sent when you tap a Follow-ups row, are only sent once the Apps
+   Script deployment is new enough to understand them. If Sheet rows are
+   arriving but photos or follow-up dates never change, and the badge stays
    on, the newest `apps-script.gs` probably hasn't been deployed yet. See
    "Shipping an update" below.
 
