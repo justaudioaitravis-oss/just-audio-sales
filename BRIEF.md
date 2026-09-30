@@ -2,14 +2,14 @@
 
 Build a lightweight Progressive Web App for field sales lead capture. I am not a developer — explain what you're doing in plain language and don't assume I can debug.
 
-> **STATUS (updated 30 Sep 2026): Built, hardened and deployed; a feature round was committed on 30 Sep — see SESSION LOG — 30 SEP for whether it is live yet.** This file describes the app as it actually is, not just as originally requested — read this before making further changes so nothing gets rebuilt or redeployed unnecessarily. **To pick up where we left off, read SESSION LOG, KNOWN ISSUES and NEXT — EFFICIENCY PLAN at the bottom first.**
+> **STATUS (updated 30 Sep 2026): Built, hardened and deployed; 30 Sep feature round live — see SESSION LOG — 30 SEP.** This file describes the app as it actually is, not just as originally requested — read this before making further changes so nothing gets rebuilt or redeployed unnecessarily. **To pick up where we left off, read SESSION LOG, KNOWN ISSUES and NEXT — EFFICIENCY PLAN at the bottom first.**
 >
 > - **Live app:** `https://justaudioaitravis-oss.github.io/just-audio-sales/`
 > - **GitHub repo:** `https://github.com/justaudioaitravis-oss/just-audio-sales` (public repo — GitHub Pages on the free tier requires this, so nothing secret may ever go in it; see PASSCODE LOCK below)
 > - **Google Sheet:** tab named `Leads`, columns match the APPS SCRIPT section below
 > - **Apps Script:** deployed as a Web App, URL pasted into `config.js` → `APPS_SCRIPT_URL`. To ship a script change, edit `apps-script.gs`, paste into the Apps Script editor, then Deploy → Manage deployments → edit → **New version** → Deploy (the live URL does not change, so `config.js` never needs re-editing for a script-only change)
 > - Installed to home screen on the owner's phone, behind a passcode screen checked by the Apps Script (see PASSCODE LOCK)
-> - **Live versions:** app = commit `8429cfd` on GitHub Pages; Apps Script = API version **4** (deployed, `PASSCODE` script property set, 8+ chars); Drive photo folder confirmed private. The owner deleted all Sheet rows on 28 Sep 2026 to start fresh. **The 30 Sep features need Apps Script version 5 deployed before the app is pushed.**
+> - **Live versions (30 Sep 2026):** app = commit `d02904f` (30 Sep feature round) on GitHub Pages; Apps Script = API version **5** (deployed and confirmed via `?v=1`; `PASSCODE` script property set, 8+ chars); Drive photo folder confirmed private. The owner deleted all Sheet rows on 28 Sep 2026 to start fresh.
 > - **Shipping any app change:** deploy Apps Script first (if changed), then upload files. No version bump needed — phones pick up changed files automatically (see OFFLINE)
 
 **Stack constraints (strict):** Plain HTML, CSS and vanilla JavaScript. No React, no Vue, no Tailwind, no npm packages, no build step, no bundler. Total payload under 50KB excluding photos. It must open in under one second on a mid-range Android phone on weak wifi.
@@ -242,7 +242,7 @@ A full review → fix → stress-test pass, shipped in these commits (all pushed
 
 **SESSION LOG — 30 SEP 2026**
 
-The owner's feature round, plus fixes from the plan below. **Committed locally. Not live until the owner deploys Apps Script v5 and the app is pushed** — update the Live versions line at the top once that's done.
+The owner's feature round, plus fixes from the plan below. **Live:** Apps Script v5 deployed by the owner and confirmed, then the app pushed (30 Sep).
 
 - Multiple enquiries per lead; Automation and Rental added. A single `first_<contact type>` template with `{services}` replaces the three per-enquiry first messages.
 - Single brochure (`BROCHURE_URL`).
