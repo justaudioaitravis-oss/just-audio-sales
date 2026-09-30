@@ -9,7 +9,7 @@ Build a lightweight Progressive Web App for field sales lead capture. I am not a
 > - **Google Sheet:** tab named `Leads`, columns match the APPS SCRIPT section below
 > - **Apps Script:** deployed as a Web App, URL pasted into `config.js` → `APPS_SCRIPT_URL`. To ship a script change, edit `apps-script.gs`, paste into the Apps Script editor, then Deploy → Manage deployments → edit → **New version** → Deploy (the live URL does not change, so `config.js` never needs re-editing for a script-only change)
 > - Installed to home screen on the owner's phone, behind a passcode screen checked by the Apps Script (see PASSCODE LOCK)
-> - **Live versions (30 Sep 2026, round 2):** app = commit `0cc8d58` (location fix, round 3) on GitHub Pages; Apps Script = API version **6** (deployed and confirmed via `APPS_SCRIPT_URL?v=1` → `"v":6`; `PASSCODE` script property set, 8+ chars); Drive photo folder confirmed private. The owner deleted all Sheet rows on 28 Sep 2026 to start fresh.
+> - **Live versions (30 Sep 2026, round 2):** app = commit `354e80c` (map lock-down + CSP, round 4) on GitHub Pages; Apps Script = API version **6** (deployed and confirmed via `APPS_SCRIPT_URL?v=1` → `"v":6`; `PASSCODE` script property set, 8+ chars); Drive photo folder confirmed private. The owner deleted all Sheet rows on 28 Sep 2026 to start fresh.
 > - **Shipping any app change:** deploy Apps Script first (if changed), then upload files. No version bump needed — phones pick up changed files automatically (see OFFLINE)
 
 **Stack constraints (strict):** Plain HTML, CSS and vanilla JavaScript. No React, no Vue, no Tailwind, no npm packages, no build step, no bundler. Total payload under 50KB excluding photos. It must open in under one second on a mid-range Android phone on weak wifi.
