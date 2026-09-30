@@ -2,14 +2,14 @@
 
 Build a lightweight Progressive Web App for field sales lead capture. I am not a developer — explain what you're doing in plain language and don't assume I can debug.
 
-> **STATUS (updated 30 Sep 2026, round 2): Built, hardened and deployed. Round 2 (brand look, review/edit, music, location) is committed — see SESSION LOG — 30 SEP (ROUND 2) for whether it is live yet.** This file describes the app as it actually is, not just as originally requested — read this before making further changes so nothing gets rebuilt or redeployed unnecessarily. **To pick up where we left off, read SESSION LOG, KNOWN ISSUES and NEXT — EFFICIENCY PLAN at the bottom first.**
+> **STATUS (updated 30 Sep 2026, round 2): Built, hardened and deployed. Round 2 (brand look, review/edit, music, location) is live — see SESSION LOG — 30 SEP (ROUND 2).** This file describes the app as it actually is, not just as originally requested — read this before making further changes so nothing gets rebuilt or redeployed unnecessarily. **To pick up where we left off, read SESSION LOG, KNOWN ISSUES and NEXT — EFFICIENCY PLAN at the bottom first.**
 >
 > - **Live app:** `https://justaudioaitravis-oss.github.io/just-audio-sales/`
 > - **GitHub repo:** `https://github.com/justaudioaitravis-oss/just-audio-sales` (public repo — GitHub Pages on the free tier requires this, so nothing secret may ever go in it; see PASSCODE LOCK below)
 > - **Google Sheet:** tab named `Leads`, columns match the APPS SCRIPT section below
 > - **Apps Script:** deployed as a Web App, URL pasted into `config.js` → `APPS_SCRIPT_URL`. To ship a script change, edit `apps-script.gs`, paste into the Apps Script editor, then Deploy → Manage deployments → edit → **New version** → Deploy (the live URL does not change, so `config.js` never needs re-editing for a script-only change)
 > - Installed to home screen on the owner's phone, behind a passcode screen checked by the Apps Script (see PASSCODE LOCK)
-> - **Live versions (30 Sep 2026, before round 2):** app = commit `d02904f` (round 1) on GitHub Pages; Apps Script = API version **5** (deployed and confirmed via `?v=1`; `PASSCODE` script property set, 8+ chars). **Round 2 needs Apps Script version 6 deployed before the app is pushed** — check by opening `APPS_SCRIPT_URL?v=1`, which must say `"v":6`; Drive photo folder confirmed private. The owner deleted all Sheet rows on 28 Sep 2026 to start fresh.
+> - **Live versions (30 Sep 2026, round 2):** app = commit `b2b84df` on GitHub Pages; Apps Script = API version **6** (deployed and confirmed via `APPS_SCRIPT_URL?v=1` → `"v":6`; `PASSCODE` script property set, 8+ chars); Drive photo folder confirmed private. The owner deleted all Sheet rows on 28 Sep 2026 to start fresh.
 > - **Shipping any app change:** deploy Apps Script first (if changed), then upload files. No version bump needed — phones pick up changed files automatically (see OFFLINE)
 
 **Stack constraints (strict):** Plain HTML, CSS and vanilla JavaScript. No React, no Vue, no Tailwind, no npm packages, no build step, no bundler. Total payload under 50KB excluding photos. It must open in under one second on a mid-range Android phone on weak wifi.
@@ -280,7 +280,7 @@ The owner's feature round, plus fixes from the plan below. **Live:** Apps Script
 
 **SESSION LOG — 30 SEP 2026 (ROUND 2)**
 
-The owner's requests, all built and committed. **Not live until the owner deploys Apps Script v6 and the app is pushed** — then update the Live versions line at the top.
+The owner's requests, all built and committed. **Live:** Apps Script v6 deployed by the owner and confirmed, then the app pushed (30 Sep).
 
 - **Brand look:**
   - Navy `#0C4670` and the white Just Audio wordmark, with a logo bar on every screen.
