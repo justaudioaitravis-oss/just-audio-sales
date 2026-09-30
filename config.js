@@ -12,84 +12,106 @@ const CONFIG = {
   // in the Apps Script's private settings (Project Settings → Script
   // Properties → PASSCODE) — see README, "Changing the passcode".
 
-  // Brochure links — one per enquiry type. These are sent inside the
-  // WhatsApp message so the customer can tap through to see products.
-  // If you only have one brochure, set all three to the same URL.
-  BROCHURE: {
-    sales:     "BROCHURE_URL_SALES_PLACEHOLDER",
-    service:   "BROCHURE_URL_SERVICE_PLACEHOLDER",
-    acoustics: "BROCHURE_URL_ACOUSTICS_PLACEHOLDER"
-  },
+  // The brochure link sent inside WhatsApp messages wherever {brochure}
+  // appears. One brochure covers every service.
+  BROCHURE_URL: "BROCHURE_URL_PLACEHOLDER",
 
   // Shown inside message templates wherever {company} appears.
   COMPANY_NAME: "Just Audio",
 
-  // The automatic follow-up cadence, counted in days from the date of the
-  // visit (not from today, and not from the previous nudge). A lead's very
-  // first reminder falls due REMINDER_SCHEDULE_DAYS[0] days after the visit,
-  // the second at REMINDER_SCHEDULE_DAYS[1], and so on. Once the schedule
-  // runs out, reminders keep repeating every MONTHLY_INTERVAL_DAYS days.
-  // Default below = 2 days, then 1 week, then 2 weeks, then monthly.
+  // The automatic follow-up cadence. Each number is the gap in days since
+  // the PREVIOUS message went out — the next reminder can't be sent before
+  // then. So by default: 2 days after the first message, then 1 week after
+  // that nudge, then 2 weeks after that one, then every MONTHLY_INTERVAL_DAYS.
+  // Sent reminders can't be undone.
   REMINDER_SCHEDULE_DAYS: [2, 7, 14],
   MONTHLY_INTERVAL_DAYS: 30,
 
-  // Photo labels for the first room logged against a lead.
-  ROOM_ONE_LABELS: ["Front wall", "Left wall", "Right wall", "Back wall", "Ceiling"],
+  // The same, for chasing a quote once "Quoted" is tapped on a Follow-ups
+  // lead: counted from the day it was quoted, then from each chase sent.
+  // After the list runs out, chases repeat every MONTHLY_INTERVAL_DAYS.
+  QUOTE_SCHEDULE_DAYS: [2, 7, 14],
 
-  // Photo labels used for every room added after the first, via
-  // "+ Add another room" on the New Entry screen.
-  EXTRA_ROOM_LABELS: ["Front wall", "Left wall", "Right wall", "Back wall", "Ceiling", "Overview"],
+  // Enquiry chips on the New entry screen. More than one can be picked.
+  // The words on the right are what goes into {services} in the first
+  // message, e.g. "a new sound system and acoustic treatment".
+  ENQUIRIES: {
+    sales:      "a new sound system",
+    service:    "servicing your current setup",
+    acoustics:  "acoustic treatment",
+    automation: "automation",
+    rental:     "equipment rental"
+  },
+
+  // The "Venue type" dropdown on the New entry screen, in this order.
+  VENUE_TYPES: ["Hotel", "Shack", "Restaurant", "Bar", "Pub", "Club", "Home (Stereo)", "Home (Surround)", "Other"],
+
+  // Photo labels — every room gets one slot per label, in this order
+  // ("+ Add another room" adds another full set). Always shown and saved
+  // in capitals, however they are typed here.
+  ROOM_LABELS: ["FRONT WALL", "LEFT WALL", "RIGHT WALL", "BACK WALL", "CEILING", "OVERVIEW"],
 
   // Message templates. Placeholders {name} {venue} {brochure} {rep} {company}
-  // are swapped for real values right before the WhatsApp message is built.
-  // Use \n for a line break — it will show as a real line break on WhatsApp.
+  // {services} are swapped for real values right before the WhatsApp
+  // message is built. Use \n for a line break — it will show as a real line
+  // break on WhatsApp.
   TEMPLATES: {
-    // Sent the moment a Sales visit is logged (New Entry submit).
-    first_sales:
+    // First message, sent the moment a New entry is saved. One per type of
+    // contact (the chips at the top of New entry).
+    first_visit:
       "Hi {name}, this is {rep} from {company}.\n\n" +
-      "Good speaking with you at {venue}. We would love to put together a sound system quote for your space, and can arrange a free site survey at a time that suits you.\n\n" +
-      "Here is a bit about what we do: {brochure}\n\n" +
-      "Let me know a good time to visit.",
+      "Good speaking with you at {venue}. As discussed, we can help with {services}. We will put together a quote, and can arrange a free site survey at a time that suits you.\n\n" +
+      "Our brochure: {brochure}",
 
-    // Sent the moment a Service visit is logged (New Entry submit).
-    first_service:
+    first_walkin:
       "Hi {name}, this is {rep} from {company}.\n\n" +
-      "Good speaking with you at {venue}. Happy to take a look at your current setup and sort out any issues you are facing.\n\n" +
-      "A little more on our service work: {brochure}\n\n" +
-      "Let me know a time that works and we will come by.",
+      "Thank you for coming in to see us. As discussed, we can help with {services} for {venue}. We will put together a quote, and can arrange a free site survey at a time that suits you.\n\n" +
+      "Our brochure: {brochure}",
 
-    // Sent the moment an Acoustics visit is logged (New Entry submit).
-    first_acoustics:
+    first_inbound:
       "Hi {name}, this is {rep} from {company}.\n\n" +
-      "Good speaking with you at {venue}. We can take a look at the room and suggest some simple ways to improve the sound and cut down on complaints.\n\n" +
-      "Here is some background on our acoustics work: {brochure}\n\n" +
-      "Let me know a good time to visit.",
+      "Thank you for getting in touch. As discussed, we can help with {services} for {venue}. We will put together a quote, and can arrange a free site survey at a time that suits you.\n\n" +
+      "Our brochure: {brochure}",
 
-    // Reminder #1 — sent REMINDER_SCHEDULE_DAYS[0] days after the visit (default: 2 days).
+    first_site_visit:
+      "Hi {name}, this is {rep} from {company}.\n\n" +
+      "Thank you for having us at {venue} today. We have the measurements and photos we need for {services}, and will send you a quote shortly.\n\n" +
+      "Our brochure: {brochure}",
+
+    // Reminders, in order (see REMINDER_SCHEDULE_DAYS above).
     nudge_2day:
-      "Hi {name}, this is {rep} from {company}, following up after visiting {venue}.\n\n" +
-      "Just checking you received everything you needed from our chat — happy to answer any questions.",
+      "Hi {name}, this is {rep} from {company}, following up on our chat about {venue}.\n\n" +
+      "Just checking you received everything you needed — happy to answer any questions.",
 
-    // Reminder #2 — sent REMINDER_SCHEDULE_DAYS[1] days after the visit (default: 1 week).
     nudge_1week:
       "Hi {name}, this is {rep} from {company}, checking in again about {venue}.\n\n" +
       "Wanted to see if you have had a chance to think this over, and if there is anything I can help with.",
 
-    // Reminder #3 — sent REMINDER_SCHEDULE_DAYS[2] days after the visit (default: 2 weeks).
     nudge_2week:
       "Hi {name}, this is {rep} from {company}, following up once more on {venue}.\n\n" +
-      "No pressure at all — just let me know if the timing works better later, or if you would like another look at the numbers.",
+      "No pressure at all — just let me know if the timing works better later.",
 
-    // Reminder #4 onward — sent every MONTHLY_INTERVAL_DAYS days after that (default: monthly).
     nudge_monthly:
       "Hi {name}, this is {rep} from {company}, touching base again about {venue}.\n\n" +
       "We are still very happy to help whenever the time is right — just let me know.",
 
-    // Sent when a quote has gone out and is overdue for a reply
-    // (used only when a lead's status is manually set to "quoted").
-    quote_chase:
+    // Quote chases, in order (see QUOTE_SCHEDULE_DAYS above). Used once
+    // "Quoted" has been tapped for a lead, instead of the reminders above.
+    quote_2day:
       "Hi {name}, this is {rep} from {company}.\n\n" +
-      "Checking in on the quote we sent over for {venue}. Happy to answer any questions or adjust anything to fit your budget.",
+      "Just checking the quote for {venue} reached you. Happy to go through it or answer any questions.",
+
+    quote_1week:
+      "Hi {name}, this is {rep} from {company}.\n\n" +
+      "Checking in on the quote we sent over for {venue}. Happy to adjust anything to fit your budget.",
+
+    quote_2week:
+      "Hi {name}, this is {rep} from {company}, following up on the quote for {venue}.\n\n" +
+      "If the timing is not right yet, just let me know and I will check back later.",
+
+    quote_monthly:
+      "Hi {name}, this is {rep} from {company}.\n\n" +
+      "Our quote for {venue} still stands, and we are happy to revisit it whenever suits you.",
 
     // Available for manual use — not sent automatically by the schedule.
     survey_offer:

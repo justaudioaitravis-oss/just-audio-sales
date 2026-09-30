@@ -52,6 +52,16 @@
     <form id="new-form">
 
       <div class="field-group">
+        <span class="field-label">Type of contact</span>
+        <div class="chip-row" id="source-chips">
+          <button type="button" class="chip" data-value="visit">Field visit</button>
+          <button type="button" class="chip" data-value="walkin">Walk-in</button>
+          <button type="button" class="chip" data-value="inbound">Inbound</button>
+          <button type="button" class="chip" data-value="site_visit">Site visit</button>
+        </div>
+      </div>
+
+      <div class="field-group">
         <span class="field-label">Phone</span>
         <div class="phone-row" id="phone-row">
           <span class="phone-prefix">+91</span>
@@ -59,6 +69,7 @@
         </div>
         <div id="phone-error" class="inline-error"></div>
         <div id="dupe-line" class="dupe-line hidden"></div>
+        <div id="site-chips" class="chip-row wrap hidden"><!-- this owner's sites, injected by app.js --></div>
       </div>
 
       <div class="two-up">
@@ -73,12 +84,24 @@
       </div>
 
       <div class="field-group">
-        <span class="field-label">Enquiry</span>
-        <div class="chip-row" id="enquiry-chips">
-          <button type="button" class="chip" data-value="sales">Sales</button>
-          <button type="button" class="chip" data-value="service">Service</button>
-          <button type="button" class="chip" data-value="acoustics">Acoustics</button>
+        <span class="field-label">Venue type</span>
+        <select id="venue-type-input" class="underline-input"><option value="">Choose…</option></select>
+      </div>
+
+      <div class="field-group">
+        <span class="field-label">Venue size (feet)</span>
+        <div class="size-row">
+          <label class="size-cell"><input id="length-input" class="underline-input" type="text" inputmode="decimal" autocomplete="off"><span>Length</span></label>
+          <label class="size-cell"><input id="breadth-input" class="underline-input" type="text" inputmode="decimal" autocomplete="off"><span>Breadth</span></label>
+          <label class="size-cell"><input id="height-input" class="underline-input" type="text" inputmode="decimal" autocomplete="off"><span>Height</span></label>
+          <label class="size-cell"><input id="area-input" class="underline-input" type="text" inputmode="decimal" autocomplete="off"><span>Area sq ft</span></label>
         </div>
+      </div>
+
+      <div class="field-group">
+        <span class="field-label">Enquiry — pick all that apply</span>
+        <div class="chip-row wrap" id="enquiry-chips"><!-- one chip per CONFIG.ENQUIRIES, injected by app.js --></div>
+        <div id="enquiry-error" class="inline-error"></div>
       </div>
 
       <div class="field-group">

@@ -8,10 +8,10 @@
 //   3. Passcode lock screen (first open only, per phone)
 //   4. Rep name prompt (first open only, per phone)
 //   5. Bottom nav tab switching
-//   6. Follow-ups tab: render list (every lead, with its next contact date),
-//      handle tap-to-send, handle undo
-//   7. New Entry tab: chips, room-based labeled photo capture + compression,
-//      duplicate check, submit
+//   6. Follow-ups tab: render list (every open lead, with its next contact
+//      date); tap a row for Send / Call / Quoted / Won / Lost
+//   7. New Entry tab: type of contact, owner's sites (duplicate check),
+//      venue details, enquiry chips, room-based photos + compression, submit
 //   8. Offline queue: every submission is saved on the phone first, then
 //      sent in small pieces, retrying automatically until it gets through
 //   9. Service worker registration
@@ -63,24 +63,62 @@
     return DAY_MONTH.format(new Date(y, m - 1, d));
   }
 
-  // The automatic reminder cadence. Stage 0 is the first reminder after a
-  // visit, stage 1 the second, and so on. Every offset counts days from the
-  // visit date itself (CONFIG.REMINDER_SCHEDULE_DAYS), and once that list
-  // runs out, reminders keep repeating every CONFIG.MONTHLY_INTERVAL_DAYS.
-  function offsetForStage(stage) {
-    const schedule = CONFIG.REMINDER_SCHEDULE_DAYS;
-    if (stage < schedule.length) return schedule[stage];
-    const extra = stage - schedule.length + 1;
-    return schedule[schedule.length - 1] + CONFIG.MONTHLY_INTERVAL_DAYS * extra;
+  function formatPhone(phone) {
+    return String(phone || "").replace(/^\+91(\d{5})(\d{5})$/, "+91 $1 $2");
   }
 
-  function stageInfo(stage) {
-    switch (stage) {
-      case 0: return { label: "2-day nudge", template: "nudge_2day" };
-      case 1: return { label: "1-week nudge", template: "nudge_1week" };
-      case 2: return { label: "2-week nudge", template: "nudge_2week" };
-      default: return { label: "Monthly nudge", template: "nudge_monthly" };
-    }
+  // "Sales" for "sales" — the words shown on the Enquiry chips.
+  function enquiryName(key) {
+    return key.charAt(0).toUpperCase() + key.slice(1);
+  }
+
+  // A lead's enquiry is saved as e.g. "sales, acoustics".
+  function enquiryKeys(enquiry) {
+    return String(enquiry || "").split(/,\s*/).filter(Boolean);
+  }
+
+  function enquiryNames(enquiry) {
+    return enquiryKeys(enquiry).map(enquiryName).join(", ");
+  }
+
+  // "a new sound system, servicing your current setup and acoustic
+  // treatment" — the {services} words in the first message.
+  function servicesPhrase(enquiry) {
+    const parts = enquiryKeys(enquiry).map((k) => CONFIG.ENQUIRIES[k] || k);
+    if (parts.length < 2) return parts.join("");
+    return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  }
+
+  // The automatic reminder cadence. An open lead is on one of two tracks:
+  // reminders after a contact ("nudge"), or chases once it has been quoted
+  // ("quote"). Stage 0 is the first message on the track, stage 1 the
+  // next, and so on. Each gap counts from the previous message actually
+  // sent (for stage 0, from the contact or the quote itself), so the next
+  // one can never be sent sooner than its gap. Once the track's list of
+  // gaps runs out, it repeats every CONFIG.MONTHLY_INTERVAL_DAYS.
+  const TRACKS = {
+    nudge: { days: () => CONFIG.REMINDER_SCHEDULE_DAYS, templates: ["nudge_2day", "nudge_1week", "nudge_2week"], monthly: "nudge_monthly", noun: "nudge" },
+    quote: { days: () => CONFIG.QUOTE_SCHEDULE_DAYS, templates: ["quote_2day", "quote_1week", "quote_2week"], monthly: "quote_monthly", noun: "quote chase" }
+  };
+
+  function trackFor(lead) {
+    return lead.status === "quoted" ? TRACKS.quote : TRACKS.nudge;
+  }
+
+  function gapForStage(track, stage) {
+    const days = track.days();
+    return stage < days.length ? days[stage] : CONFIG.MONTHLY_INTERVAL_DAYS;
+  }
+
+  // The label ("1-week nudge") and template of a lead's next message.
+  function stageInfo(lead) {
+    const track = trackFor(lead);
+    const stage = lead.reminder_stage || 0;
+    const days = track.days();
+    if (stage >= days.length) return { label: `Monthly ${track.noun}`, template: track.monthly };
+    const gap = days[stage];
+    const when = gap % 7 === 0 ? `${gap / 7}-week` : `${gap}-day`;
+    return { label: `${when} ${track.noun}`, template: track.templates[stage] || track.monthly };
   }
 
   // ---------------------------------------------------------------------
@@ -92,7 +130,8 @@
     legacyUnlocked: "ja_unlocked", // older versions: "yes" once unlocked (no longer enough)
     rep: "ja_rep",
     leads: "ja_leads",
-    queue: "ja_queue"
+    queue: "ja_queue",
+    serverVersion: "ja_server_v" // the Apps Script's version, last time it said
   };
 
   // The passcode is checked by the Apps Script, not by this code (which is
@@ -126,8 +165,15 @@
       return [];
     }
   }
+  // Never throws: if the phone's storage is ever full, the visit still
+  // reaches the upload queue (which lives elsewhere, in IndexedDB).
   function saveLeads(leads) {
-    localStorage.setItem(STORE_KEYS.leads, JSON.stringify(leads));
+    try {
+      localStorage.setItem(STORE_KEYS.leads, JSON.stringify(leads));
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   // The offline queue used to live in localStorage under STORE_KEYS.queue.
@@ -280,13 +326,19 @@
   const doneSectionEl = document.getElementById("done-section");
   const followupsDoneEl = document.getElementById("followups-done");
 
+  // Won or lost: the reminders stop and the lead leaves the list.
+  function isClosed(lead) {
+    return lead.status === "won" || lead.status === "lost";
+  }
+
   function clearStaleDone(leads) {
     const today = todayStr();
     let changed = false;
     leads.forEach((lead) => {
       if (lead._doneAt && lead._doneAt !== today) {
         delete lead._doneAt;
-        delete lead._prevState;
+        delete lead._doneLabel;
+        delete lead._prevState; // left by older versions, which had undo
         changed = true;
       }
     });
@@ -294,44 +346,34 @@
     return leads;
   }
 
-  // Which draft a lead's next follow-up uses: its label and template.
-  function draftKind(lead) {
-    if (lead.status === "quoted") return { kind: "Quote chase", template: CONFIG.TEMPLATES.quote_chase };
-    const info = stageInfo(lead.reminder_stage || 0);
-    return { kind: info.label, template: CONFIG.TEMPLATES[info.template] };
-  }
-
   // Line 2 of a Follow-ups row, e.g. "2-day nudge · 3 days late".
   function draftLabel(lead, today) {
-    const { kind } = draftKind(lead);
+    const { label } = stageInfo(lead);
     const diff = daysBetween(lead.next_action_date, today); // >0 = overdue, <0 = upcoming
-    if (diff > 0) return `${kind} · ${diff} day${diff === 1 ? "" : "s"} late`;
-    if (diff < 0) return `${kind} · due ${formatDateHuman(lead.next_action_date)}`;
-    return kind;
+    if (diff > 0) return `${label} · ${diff} day${diff === 1 ? "" : "s"} late`;
+    if (diff < 0) return `${label} · due ${formatDateHuman(lead.next_action_date)}`;
+    return label;
   }
 
-  // The full WhatsApp message — only built when a row is actually tapped.
-  function draftMessage(lead) {
-    return fillTemplate(draftKind(lead).template, {
+  function messageVars(lead) {
+    return {
       name: lead.contact_name,
       venue: lead.venue,
-      brochure: (CONFIG.BROCHURE && CONFIG.BROCHURE[lead.enquiry]) || "",
+      brochure: CONFIG.BROCHURE_URL || "",
       rep: lead.rep,
-      company: CONFIG.COMPANY_NAME
-    });
+      company: CONFIG.COMPANY_NAME,
+      services: servicesPhrase(lead.enquiry)
+    };
   }
 
-  // What a "Done today" row says: the message that was just sent (not the
-  // next one), so it can't be mistaken for a reminder waiting to go out.
-  function doneLabel(lead) {
-    const sent = lead._prevState ? draftKind(lead._prevState).kind : draftKind(lead).kind;
-    return `${sent} sent · tap to undo`;
+  function openWhatsApp(phone, message) {
+    window.open(`https://wa.me/${phone.replace("+", "")}?text=${encodeURIComponent(message)}`, "_blank");
   }
 
   // A reminder can be sent from its due date onward (due today, or late) —
   // never before. E.g. no 2-day nudge on the day of the visit itself.
   function isDue(lead, today) {
-    return lead.next_action_date <= today;
+    return !!lead.next_action_date && lead.next_action_date <= today;
   }
 
   function leadRowEl(lead, label, rowClass) {
@@ -340,7 +382,7 @@
     li.dataset.id = lead.lead_id;
     const venue = document.createElement("div");
     venue.className = "venue";
-    venue.textContent = lead.venue;
+    venue.textContent = lead.venue || lead.contact_name || lead.phone;
     const line = document.createElement("div");
     line.className = "draft-line";
     line.textContent = label;
@@ -353,10 +395,10 @@
     leads = clearStaleDone(leads);
     const today = todayStr();
 
-    // Every lead shows up immediately, the moment a visit is logged — not
-    // only once its next reminder is due — sorted soonest-due first.
+    // Every open lead shows up immediately, the moment a visit is logged —
+    // not only once its next reminder is due — sorted soonest-due first.
     const active = leads
-      .filter((l) => !l._doneAt)
+      .filter((l) => !l._doneAt && !isClosed(l))
       .sort((a, b) => (a.next_action_date < b.next_action_date ? -1 : a.next_action_date > b.next_action_date ? 1 : 0));
 
     const done = leads.filter((l) => l._doneAt === today);
@@ -370,66 +412,171 @@
     followupsListEl.textContent = "";
     followupsListEl.appendChild(activeRows);
 
-    followupsEmptyEl.classList.toggle("hidden", leads.length > 0);
+    followupsEmptyEl.textContent = leads.length ? "No open leads." : "No leads yet.";
+    followupsEmptyEl.classList.toggle("hidden", active.length + done.length > 0);
 
     const doneRows = document.createDocumentFragment();
-    done.forEach((lead) => doneRows.appendChild(leadRowEl(lead, doneLabel(lead), "done")));
+    done.forEach((lead) => doneRows.appendChild(leadRowEl(lead, lead._doneLabel || "Sent", "done")));
     followupsDoneEl.textContent = "";
     followupsDoneEl.appendChild(doneRows);
     doneSectionEl.classList.toggle("hidden", done.length === 0);
   }
 
-  // One tap listener per list (rather than one per row) — rows say which
-  // lead they are via data-id. Rows not due yet do nothing when tapped.
+  // Tapping a row opens a small panel under it: Send (only once due),
+  // Call, Quoted, Won, Lost. One tap listener for the whole list — rows say
+  // which lead they are via data-id. Done rows can't be tapped: a sent
+  // reminder can't be undone.
   followupsListEl.addEventListener("click", (e) => {
-    const row = e.target.closest(".lead-row.due");
-    if (row) handleFollowupTap(row.dataset.id);
-  });
-  followupsDoneEl.addEventListener("click", (e) => {
     const row = e.target.closest(".lead-row");
-    if (row) handleUndoTap(row.dataset.id);
+    if (!row) return;
+    const btn = e.target.closest("[data-action]");
+    if (btn) handleRowAction(row.dataset.id, btn);
+    else if (!e.target.closest(".row-panel")) toggleRow(row);
   });
 
-  function handleFollowupTap(leadId) {
+  function toggleRow(row) {
+    const wasOpen = row.classList.contains("open");
+    followupsListEl.querySelectorAll(".lead-row.open").forEach((r) => {
+      r.classList.remove("open");
+      const panel = r.querySelector(".row-panel");
+      if (panel) panel.remove();
+    });
+    if (wasOpen) return;
+    const lead = getLeads().find((l) => l.lead_id === row.dataset.id);
+    if (!lead) return;
+    row.classList.add("open");
+    row.appendChild(rowPanelEl(lead, todayStr()));
+  }
+
+  function rowPanelEl(lead, today) {
+    const panel = document.createElement("div");
+    panel.className = "row-panel";
+
+    const info = document.createElement("div");
+    info.className = "row-info";
+    const size = [lead.length_ft, lead.breadth_ft, lead.height_ft].filter(Boolean).join(" × ");
+    info.textContent = [
+      lead.contact_name,
+      formatPhone(lead.phone),
+      enquiryNames(lead.enquiry),
+      lead.venue_type,
+      size && `${size} ft`,
+      lead.area_sqft && `${lead.area_sqft} sq ft`,
+      lead.status === "quoted" && lead.quoted_on && `quoted ${formatDateHuman(lead.quoted_on)}`
+    ].filter(Boolean).join(" · ");
+
+    const { label } = stageInfo(lead);
+    const send = document.createElement("button");
+    send.type = "button";
+    send.className = "row-send";
+    send.dataset.action = "send";
+    if (isDue(lead, today)) {
+      send.textContent = `Send ${label}`;
+    } else {
+      send.textContent = `${label} · due ${formatDateHuman(lead.next_action_date)}`;
+      send.disabled = true;
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "row-actions";
+    const call = document.createElement("a");
+    call.className = "row-btn";
+    call.href = `tel:${lead.phone}`;
+    call.textContent = "Call";
+    actions.appendChild(call);
+    [["quoted", lead.status === "quoted" ? "Requoted" : "Quoted"], ["won", "Won"], ["lost", "Lost"]].forEach(([action, text]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "row-btn";
+      b.dataset.action = action;
+      b.textContent = text;
+      actions.appendChild(b);
+    });
+
+    panel.append(info, send, actions);
+    return panel;
+  }
+
+  // Quoted, Won and Lost can't be undone, so each needs a second tap:
+  // the first turns the button into "Confirm" for a few seconds.
+  let armTimer = null;
+  function disarm(btn) {
+    if (!btn.classList.contains("armed")) return;
+    btn.classList.remove("armed");
+    btn.textContent = btn.dataset.text;
+  }
+
+  function handleRowAction(leadId, btn) {
+    const action = btn.dataset.action;
+    if (action === "send") { sendReminder(leadId); return; }
+    if (!btn.classList.contains("armed")) {
+      btn.closest(".row-actions").querySelectorAll(".armed").forEach(disarm);
+      btn.dataset.text = btn.textContent;
+      btn.textContent = "Confirm";
+      btn.classList.add("armed");
+      clearTimeout(armTimer);
+      armTimer = setTimeout(() => disarm(btn), 4000);
+      return;
+    }
+    clearTimeout(armTimer);
+    if (action === "quoted") markQuoted(leadId);
+    else closeLead(leadId, action);
+  }
+
+  // Sends the reminder that's due, and moves the lead on to the next one —
+  // due the next gap in the schedule after today (see stageInfo).
+  function sendReminder(leadId) {
     const leads = getLeads();
     const lead = leads.find((l) => l.lead_id === leadId);
-    if (!lead || !isDue(lead, todayStr())) return;
-
-    const message = draftMessage(lead);
-    const url = `https://wa.me/${lead.phone.replace("+", "")}?text=${encodeURIComponent(message)}`;
-    window.open(url, "_blank");
-
     const today = todayStr();
-    lead._prevState = {
-      reminder_stage: lead.reminder_stage,
-      next_action_date: lead.next_action_date,
-      last_contacted: lead.last_contacted,
-      status: lead.status
-    };
+    if (!lead || !isDue(lead, today)) return;
+
+    const info = stageInfo(lead);
+    openWhatsApp(lead.phone, fillTemplate(CONFIG.TEMPLATES[info.template] || "", messageVars(lead)));
+
     lead.reminder_stage = (lead.reminder_stage || 0) + 1;
-    lead.next_action_date = addDays(lead.schedule_anchor, offsetForStage(lead.reminder_stage));
+    lead.next_action_date = addDays(today, gapForStage(trackFor(lead), lead.reminder_stage));
     lead.last_contacted = today;
     lead._doneAt = today;
+    lead._doneLabel = `${info.label} sent`;
 
     saveLeads(leads);
-    queueFollowupUpdate(lead);
+    queueFollowupUpdate(lead, ["reminder_stage", "next_action_date", "last_contacted"]);
     renderFollowups();
   }
 
-  function handleUndoTap(leadId) {
+  // A quote has gone out: switch this lead to the quote-chase messages,
+  // counting from today. Tapping it again (a revised quote) restarts them.
+  function markQuoted(leadId) {
     const leads = getLeads();
     const lead = leads.find((l) => l.lead_id === leadId);
-    if (!lead || !lead._prevState) return;
-
-    lead.reminder_stage = lead._prevState.reminder_stage;
-    lead.next_action_date = lead._prevState.next_action_date;
-    lead.last_contacted = lead._prevState.last_contacted;
-    lead.status = lead._prevState.status;
-    delete lead._doneAt;
-    delete lead._prevState;
-
+    if (!lead) return;
+    const today = todayStr();
+    lead.status = "quoted";
+    lead.quoted_on = today;
+    lead.schedule_anchor = today;
+    lead.reminder_stage = 0;
+    lead.next_action_date = addDays(today, gapForStage(TRACKS.quote, 0));
     saveLeads(leads);
-    queueFollowupUpdate(lead);
+    queueFollowupUpdate(lead, ["status", "quoted_on", "schedule_anchor", "reminder_stage", "next_action_date"]);
+    renderFollowups();
+  }
+
+  // Won or lost: reminders stop for good. The lead shows under "Done
+  // today" until midnight, then leaves the list. Logging a new visit for
+  // the same site reopens it.
+  function closeLead(leadId, outcome) {
+    const leads = getLeads();
+    const lead = leads.find((l) => l.lead_id === leadId);
+    if (!lead) return;
+    const today = todayStr();
+    lead.status = outcome;
+    lead.closed_on = today;
+    lead.next_action_date = "";
+    lead._doneAt = today;
+    lead._doneLabel = outcome === "won" ? "Closed — won" : "Closed — lost";
+    saveLeads(leads);
+    queueFollowupUpdate(lead, ["status", "closed_on", "next_action_date"]);
     renderFollowups();
   }
 
@@ -441,17 +588,25 @@
   const phoneRow = document.getElementById("phone-row");
   const phoneError = document.getElementById("phone-error");
   const dupeLine = document.getElementById("dupe-line");
+  const siteChipsEl = document.getElementById("site-chips");
   const contactNameInput = document.getElementById("contact-name-input");
   const venueInput = document.getElementById("venue-input");
+  const venueTypeInput = document.getElementById("venue-type-input");
+  const lengthInput = document.getElementById("length-input");
+  const breadthInput = document.getElementById("breadth-input");
+  const heightInput = document.getElementById("height-input");
+  const areaInput = document.getElementById("area-input");
+  const enquiryChipsEl = document.getElementById("enquiry-chips");
+  const enquiryError = document.getElementById("enquiry-error");
   const noteInput = document.getElementById("note-input");
   const submitBtn = document.getElementById("submit-btn");
   const newForm = document.getElementById("new-form");
   const roomsContainerEl = document.getElementById("rooms-container");
   const addRoomBtn = document.getElementById("add-room-btn");
 
-  let selectedEnquiry = "sales";
+  let selectedSource = "visit";
+  const selectedEnquiries = new Set(["sales"]);
   let photosProcessing = 0; // photos still being compressed; while above 0, Send waits ("Preparing photos…")
-  let foundDupeRecord = null; // the Sheet's copy of this number's lead, if the duplicate check found one
 
   // Phone: allow spaces while typing, keep it visually grouped
   phoneInput.addEventListener("input", () => {
@@ -460,6 +615,7 @@
     updateSubmitLabel();
     phoneError.textContent = "";
     phoneRow.classList.remove("error");
+    onPhoneChanged();
   });
 
   function currentPhoneDigits() {
@@ -478,66 +634,194 @@
   }
   updateSubmitLabel();
 
-  phoneInput.addEventListener("blur", () => {
-    const digits = currentPhoneDigits();
-    dupeLine.classList.add("hidden");
-    foundDupeRecord = null;
-    if (digits.length !== 10) return;
-    if (!CONFIG.APPS_SCRIPT_URL || CONFIG.APPS_SCRIPT_URL.indexOf("PASTE_") === 0) return;
+  // Type of contact: Field visit / Walk-in / Inbound / Site visit (one).
+  const sourceChips = Array.from(document.querySelectorAll("#source-chips .chip"));
+  function selectSource(value) {
+    selectedSource = value;
+    sourceChips.forEach((c) => c.classList.toggle("selected-dark", c.dataset.value === value));
+  }
+  sourceChips.forEach((c) => c.addEventListener("click", () => selectSource(c.dataset.value)));
+  selectSource("visit");
 
+  // Enquiry: any number of chips, one per CONFIG.ENQUIRIES.
+  Object.keys(CONFIG.ENQUIRIES).forEach((key) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.dataset.value = key;
+    chip.textContent = enquiryName(key);
+    chip.addEventListener("click", () => {
+      if (selectedEnquiries.has(key)) selectedEnquiries.delete(key);
+      else selectedEnquiries.add(key);
+      enquiryError.textContent = "";
+      renderEnquiryChips();
+    });
+    enquiryChipsEl.appendChild(chip);
+  });
+  function renderEnquiryChips() {
+    enquiryChipsEl.querySelectorAll(".chip").forEach((c) => c.classList.toggle("selected-dark", selectedEnquiries.has(c.dataset.value)));
+  }
+  renderEnquiryChips();
+
+  CONFIG.VENUE_TYPES.forEach((type) => {
+    const option = document.createElement("option");
+    option.value = option.textContent = type;
+    venueTypeInput.appendChild(option);
+  });
+  // Makes sure a saved venue type shows even if it's since been removed
+  // from CONFIG.VENUE_TYPES.
+  function setVenueType(value) {
+    if (value && !Array.from(venueTypeInput.options).some((o) => o.value === value)) {
+      const option = document.createElement("option");
+      option.value = option.textContent = value;
+      venueTypeInput.appendChild(option);
+    }
+    venueTypeInput.value = value || "";
+  }
+
+  // Venue size: area fills itself in as length × breadth, unless it has
+  // been typed in by hand.
+  let areaTyped = false;
+  areaInput.addEventListener("input", () => { areaTyped = areaInput.value.trim() !== ""; });
+  function autoArea() {
+    if (areaTyped) return;
+    const l = parseFloat(lengthInput.value);
+    const b = parseFloat(breadthInput.value);
+    areaInput.value = l > 0 && b > 0 ? String(Math.round(l * b)) : "";
+  }
+  lengthInput.addEventListener("input", autoArea);
+  breadthInput.addEventListener("input", autoArea);
+  function cleanNumber(value) {
+    return value.replace(/[^\d.]/g, "");
+  }
+
+  // ---- Owners with several sites ----
+  // Each site (venue) is its own lead, with its own Sheet row and its own
+  // reminders; an owner's sites share a phone number. Once 10 digits are
+  // typed, this number's sites appear as chips — straight away for the
+  // ones on this phone, then any others the Sheet knows about — plus
+  // "+ New site". The newest site is picked unless the rep picks another.
+
+  let sheetSites = [];     // this number's sites according to the Sheet
+  let siteChoice = null;   // lead_id of the site this entry is for, "new", or null (none yet)
+  let siteChosenByRep = false;
+  let sitesForDigits = ""; // the number the site chips are showing
+
+  function siteSortKey(site) {
+    return site.last_contacted || site.visit_date || site.created_at || "";
+  }
+
+  // This phone's leads and the Sheet's rows for the number, merged (the
+  // phone's copy wins for a site on both), newest first.
+  function sitesFor(digits) {
     const fullPhone = "+91" + digits;
+    const byId = {};
+    sheetSites.forEach((s) => { byId[s.lead_id] = s; });
+    getLeads().forEach((l) => { if (l.phone === fullPhone) byId[l.lead_id] = l; });
+    return Object.keys(byId).map((id) => byId[id])
+      .sort((a, b) => (siteSortKey(a) < siteSortKey(b) ? 1 : siteSortKey(a) > siteSortKey(b) ? -1 : 0));
+  }
+
+  function onPhoneChanged() {
+    const digits = currentPhoneDigits();
+    if (digits === sitesForDigits) return;
+    sitesForDigits = digits;
+    sheetSites = [];
+    siteChoice = null;
+    siteChosenByRep = false;
+    renderSites();
+    if (digits.length === 10) lookupSites(digits);
+  }
+
+  // Asks the Sheet for this number's sites. Silent on failure — never
+  // blocks the form; the phone's own sites are already showing.
+  function lookupSites(digits) {
+    if (!hasBackend() || !isUnlocked()) return;
     checkServerVersion(MIN_SERVER_VERSION.lookup)
-      .then((state) => (state === "ok" ? postToScript({ kind: "lookup", phone: fullPhone }, getKey(), LEAD_TIMEOUT_MS) : null))
+      .then((state) => (state === "ok" ? postToScript({ kind: "lookup", phone: "+91" + digits }, getKey(), LEAD_TIMEOUT_MS) : null))
       .then((data) => {
         if (data && data.auth) { relock(); return; }
         if (currentPhoneDigits() !== digits) return; // number changed while we were asking
-        if (data && data.found && data.record) {
-          const rec = data.record;
-          foundDupeRecord = rec.lead_id ? Object.assign({}, rec, { lead_id: String(rec.lead_id) }) : null;
-          contactNameInput.value = rec.contact_name || "";
-          venueInput.value = rec.venue || "";
-          const lastContacted = /^\d{4}-\d{2}-\d{2}$/.test(rec.last_contacted) ? formatDateHuman(rec.last_contacted) : "—";
-          dupeLine.textContent = `${rec.contact_name || ""} · ${rec.venue || ""} · last contacted ${lastContacted}`;
-          dupeLine.classList.remove("hidden");
+        if (data && data.found && data.records) {
+          sheetSites = data.records.filter((r) => r.lead_id).map((r) => Object.assign({}, r, { lead_id: String(r.lead_id) }));
+          renderSites();
         }
       })
-      .catch(() => {
-        // Silent failure — never block the form on a lookup problem.
-      });
-  });
-
-  // Chips: enquiry (dark fill)
-  function setupChipGroup(containerId, styleClass, defaultValue, onSelect) {
-    const container = document.getElementById(containerId);
-    const chips = Array.from(container.querySelectorAll(".chip"));
-    function select(value) {
-      chips.forEach((c) => c.classList.toggle(styleClass, c.dataset.value === value));
-      onSelect(value);
-    }
-    chips.forEach((c) => c.addEventListener("click", () => select(c.dataset.value)));
-    select(defaultValue);
+      .catch(() => {});
   }
-  setupChipGroup("enquiry-chips", "selected-dark", "sales", (v) => { selectedEnquiry = v; });
 
-  // Photos: room-based, each room has its own set of labeled slots.
-  // rooms[0] uses CONFIG.ROOM_ONE_LABELS; every room added after that uses
-  // CONFIG.EXTRA_ROOM_LABELS. Per label, each room keeps:
+  function renderSites() {
+    const digits = currentPhoneDigits();
+    const sites = digits.length === 10 ? sitesFor(digits) : [];
+    siteChipsEl.textContent = "";
+    if (sites.length === 0) {
+      dupeLine.classList.add("hidden");
+      siteChipsEl.classList.add("hidden");
+      siteChoice = null;
+      return;
+    }
+    if (!siteChosenByRep && siteChoice !== sites[0].lead_id) {
+      siteChoice = sites[0].lead_id;
+      fillFromSite(sites[0]);
+    }
+
+    const newest = sites[0];
+    const last = /^\d{4}-\d{2}-\d{2}$/.test(newest.last_contacted) ? formatDateHuman(newest.last_contacted) : "—";
+    dupeLine.textContent = sites.length === 1
+      ? `${newest.contact_name || ""} · ${newest.venue || ""} · last contacted ${last}`
+      : `${newest.contact_name || ""} · ${sites.length} sites · last contacted ${last}`;
+    dupeLine.classList.remove("hidden");
+
+    sites.concat([{ lead_id: "new" }]).forEach((site) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip";
+      chip.classList.toggle("selected-dark", site.lead_id === siteChoice);
+      chip.textContent = site.lead_id === "new"
+        ? "+ New site"
+        : (site.venue || "No venue name") + (isClosed(site) ? ` · ${site.status}` : "");
+      chip.addEventListener("click", () => {
+        siteChosenByRep = true;
+        siteChoice = site.lead_id;
+        fillFromSite(site.lead_id === "new" ? null : site);
+        renderSites();
+      });
+      siteChipsEl.appendChild(chip);
+    });
+    siteChipsEl.classList.remove("hidden");
+  }
+
+  // Fills in the form from a site already on record, or (null) clears the
+  // site's own details for a new site of the same owner.
+  function fillFromSite(site) {
+    if (site && site.contact_name) contactNameInput.value = site.contact_name;
+    venueInput.value = site ? site.venue || "" : "";
+    setVenueType(site ? site.venue_type : "");
+    lengthInput.value = site ? site.length_ft || "" : "";
+    breadthInput.value = site ? site.breadth_ft || "" : "";
+    heightInput.value = site ? site.height_ft || "" : "";
+    areaInput.value = site ? site.area_sqft || "" : "";
+    areaTyped = !!areaInput.value && !(lengthInput.value && breadthInput.value);
+  }
+
+  // Photos: room-based, each room has one labeled slot per
+  // CONFIG.ROOM_LABELS (always in capitals). Per label, each room keeps:
   //   photos  — the compressed photo that gets uploaded (up to 1600px)
   //   thumbs  — a small copy for the on-screen thumbnail. Showing the full
-  //             photo in a 58px square would hold ~8MB of memory per photo,
-  //             enough to crash the page on a mid-range phone with 11 photos
+  //             photo in a small square would hold ~8MB of memory per photo,
+  //             enough to crash the page on a mid-range phone with many photos
   //   failed  — true if the photo couldn't be read, so the slot says "Try again"
   //   latest  — which attempt is newest, so a slow earlier shot can't
   //             overwrite a quick retake
   const THUMB_EDGE = 192;
   let rooms = [];
 
-  function newRoom(labels) {
-    return { labels, photos: {}, thumbs: {}, failed: {}, latest: {} };
+  function newRoom() {
+    return { labels: CONFIG.ROOM_LABELS.map((l) => String(l).toUpperCase()), photos: {}, thumbs: {}, failed: {}, latest: {} };
   }
 
   function resetRooms() {
-    rooms = [newRoom(CONFIG.ROOM_ONE_LABELS)];
+    rooms = [newRoom()];
     renderRooms();
   }
 
@@ -550,7 +834,7 @@
       if (rooms.length > 1) {
         const heading = document.createElement("div");
         heading.className = "room-heading";
-        heading.textContent = `Room ${roomIndex + 1}`;
+        heading.textContent = `ROOM ${roomIndex + 1}`;
         block.appendChild(heading);
       }
 
@@ -579,7 +863,7 @@
 
         const caption = document.createElement("div");
         caption.className = room.failed[label] ? "photo-cell-label error" : "photo-cell-label";
-        caption.textContent = room.failed[label] ? "Try again" : label;
+        caption.textContent = room.failed[label] ? "TRY AGAIN" : label;
 
         cell.appendChild(slot);
         cell.appendChild(caption);
@@ -592,7 +876,7 @@
   }
 
   addRoomBtn.addEventListener("click", () => {
-    rooms.push(newRoom(CONFIG.EXTRA_ROOM_LABELS));
+    rooms.push(newRoom());
     renderRooms();
   });
 
@@ -671,6 +955,20 @@
 
   resetRooms();
 
+  // The fields of a lead that go to its Sheet row (photo_folder and
+  // updated_at are filled in by the Apps Script).
+  const LEAD_FIELDS = [
+    "lead_id", "created_at", "rep", "phone", "contact_name", "venue", "enquiry",
+    "visit_date", "note", "reminder_stage", "schedule_anchor", "next_action_date",
+    "last_contacted", "status", "source", "venue_type", "length_ft", "breadth_ft",
+    "height_ft", "area_sqft", "visit_type", "quoted_on", "closed_on"
+  ];
+
+  // new → quoted → won/lost. When the phone and the Sheet disagree about a
+  // site (e.g. "quoted" set on another phone, or by hand in the Sheet),
+  // the further-along one is kept.
+  const STATUS_RANK = { new: 0, quoted: 1, won: 2, lost: 2 };
+
   // Submit
   newForm.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -683,94 +981,71 @@
       phoneInput.focus();
       return;
     }
+    if (selectedEnquiries.size === 0) {
+      enquiryError.textContent = "Pick at least one enquiry.";
+      return;
+    }
 
     const fullPhone = "+91" + digits;
     const today = todayStr();
-    const rep = getRep();
-
     const leads = getLeads();
-    const rec = foundDupeRecord;
-    // Revisit? Match the Sheet's lead if the duplicate check found one,
-    // otherwise (e.g. no signal for the check) this phone's own lead for
-    // the same number.
-    let lead = rec
-      ? leads.find((l) => l.lead_id === rec.lead_id)
-      : leads.find((l) => l.phone === fullPhone);
 
+    // Which site is this for? One already on this phone, one the Sheet
+    // knows about (logged by another rep or phone — take over its lead_id
+    // so this entry updates that row instead of adding a duplicate), or a
+    // new one.
+    const siteId = siteChoice && siteChoice !== "new" ? siteChoice : null;
+    const rec = siteId ? sheetSites.find((s) => s.lead_id === siteId) : null;
+    let lead = siteId ? leads.find((l) => l.lead_id === siteId) : null;
     if (!lead && rec) {
-      // This number is already in the Sheet but not on this phone (first
-      // logged by another rep, or on another phone). Take over its lead_id
-      // so this visit updates that row instead of adding a duplicate.
-      lead = {
-        lead_id: rec.lead_id,
-        created_at: rec.created_at || today,
-        status: rec.status || "new",
-        source: rec.source || "visit"
-      };
+      lead = { lead_id: rec.lead_id, created_at: rec.created_at || today, status: rec.status || "new", source: rec.source || selectedSource, quoted_on: rec.quoted_on || "" };
       leads.push(lead);
-    } else if (lead && rec && rec.status) {
-      // Pick up a status set by hand in the Sheet (e.g. "quoted"), so this
-      // visit doesn't overwrite it.
+    } else if (lead && rec && (STATUS_RANK[rec.status] || 0) > (STATUS_RANK[lead.status] || 0)) {
       lead.status = rec.status;
+      lead.quoted_on = rec.quoted_on || lead.quoted_on;
     }
-
     if (!lead) {
-      lead = {
-        lead_id: String(Date.now()),
-        created_at: today,
-        status: "new",
-        source: "visit"
-      };
+      lead = { lead_id: String(Date.now()), created_at: today, status: "new", source: selectedSource };
       leads.push(lead);
     }
 
-    lead.rep = rep;
+    // A new contact with a won or lost site reopens it.
+    if (isClosed(lead)) {
+      lead.status = "new";
+      lead.closed_on = "";
+    }
+    delete lead._doneAt;
+    delete lead._doneLabel;
+
+    lead.rep = getRep();
     lead.phone = fullPhone;
     lead.contact_name = contactNameInput.value.trim();
     lead.venue = venueInput.value.trim();
-    lead.enquiry = selectedEnquiry;
+    lead.venue_type = venueTypeInput.value;
+    lead.length_ft = cleanNumber(lengthInput.value);
+    lead.breadth_ft = cleanNumber(breadthInput.value);
+    lead.height_ft = cleanNumber(heightInput.value);
+    lead.area_sqft = cleanNumber(areaInput.value);
+    lead.enquiry = Object.keys(CONFIG.ENQUIRIES).filter((k) => selectedEnquiries.has(k)).join(", ");
+    lead.visit_type = selectedSource;
     lead.visit_date = today;
     lead.note = noteInput.value.trim();
 
-    // Every visit is treated as a fresh "initial contact" — the reminder
-    // schedule resets and counts forward from today.
+    // Every contact restarts the reminders, counting from today (a quoted
+    // site restarts its quote chases).
     lead.schedule_anchor = today;
     lead.reminder_stage = 0;
     lead.last_contacted = today;
-    lead.next_action_date = addDays(today, offsetForStage(0));
+    lead.next_action_date = addDays(today, gapForStage(trackFor(lead), 0));
 
-    const payload = {
-      lead_id: lead.lead_id,
-      created_at: lead.created_at,
-      rep: lead.rep,
-      phone: lead.phone,
-      contact_name: lead.contact_name,
-      venue: lead.venue,
-      enquiry: lead.enquiry,
-      visit_date: lead.visit_date,
-      note: lead.note,
-      reminder_stage: lead.reminder_stage,
-      schedule_anchor: lead.schedule_anchor,
-      next_action_date: lead.next_action_date,
-      last_contacted: lead.last_contacted,
-      status: lead.status,
-      source: lead.source,
-      photos: collectPhotosPayload()
-    };
+    const payload = { photos: collectPhotosPayload() };
+    LEAD_FIELDS.forEach((f) => { payload[f] = lead[f] != null ? lead[f] : ""; });
 
     saveLeads(leads);
     queueLead(payload);
 
-    const template = CONFIG.TEMPLATES["first_" + lead.enquiry] || CONFIG.TEMPLATES.first_sales;
-    const message = fillTemplate(template, {
-      name: lead.contact_name,
-      venue: lead.venue,
-      brochure: (CONFIG.BROCHURE && CONFIG.BROCHURE[lead.enquiry]) || "",
-      rep: lead.rep,
-      company: CONFIG.COMPANY_NAME
-    });
-    const url = `https://wa.me/${fullPhone.replace("+", "")}?text=${encodeURIComponent(message)}`;
-    window.open(url, "_blank");
+    const template = CONFIG.TEMPLATES["first_" + selectedSource] || CONFIG.TEMPLATES.first_visit;
+    openWhatsApp(fullPhone, fillTemplate(template, messageVars(lead)));
 
     resetNewForm();
     switchTab("tab-followups");
@@ -779,16 +1054,19 @@
   function resetNewForm() {
     phoneInput.value = "";
     contactNameInput.value = "";
-    venueInput.value = "";
     noteInput.value = "";
+    fillFromSite(null);
+    areaTyped = false;
     phoneError.textContent = "";
+    enquiryError.textContent = "";
     phoneRow.classList.remove("error");
-    dupeLine.classList.add("hidden");
-    foundDupeRecord = null;
+    onPhoneChanged();
     resetRooms();
     updateSubmitLabel();
-    document.querySelectorAll("#enquiry-chips .chip").forEach((c) => c.classList.toggle("selected-dark", c.dataset.value === "sales"));
-    selectedEnquiry = "sales";
+    selectSource("visit");
+    selectedEnquiries.clear();
+    selectedEnquiries.add("sales");
+    renderEnquiryChips();
   }
 
   // ---------------------------------------------------------------------
@@ -916,18 +1194,13 @@
     queueItems(splitSubmission(payload));
   }
 
-  // A tap (or undo) on a Follow-ups row changes only the reminder fields;
-  // this sends just those, so it can't overwrite anything newer in the
-  // Sheet — like a later visit logged on another phone, or a status set
-  // there by hand.
-  function queueFollowupUpdate(lead) {
-    queueItems([{
-      kind: "update",
-      lead_id: lead.lead_id,
-      reminder_stage: lead.reminder_stage,
-      next_action_date: lead.next_action_date,
-      last_contacted: lead.last_contacted
-    }]);
+  // A Follow-ups action (Send, Quoted, Won, Lost) changes only a few of a
+  // lead's fields; this sends just those, so it can't overwrite anything
+  // newer in the Sheet — like a later visit logged on another phone.
+  function queueFollowupUpdate(lead, fields) {
+    const item = { kind: "update", lead_id: lead.lead_id };
+    fields.forEach((f) => { item[f] = lead[f] != null ? lead[f] : ""; });
+    queueItems([item]);
   }
 
   function queueItems(items) {
@@ -959,19 +1232,24 @@
       .finally(() => clearTimeout(timer));
   }
 
-  // Before sending a photo, a follow-up update, a passcode check or a
-  // duplicate-number lookup, check the Apps Script deployment is new enough
-  // to understand it. An older deployment could mistake it for a whole lead
-  // and write a blank or damaged row, so it waits until the new script is
-  // deployed.
-  const MIN_SERVER_VERSION = { photo: 2, update: 3, verify: 4, lookup: 4 };
-  let serverVersion = 0;
+  // Before sending anything, check the Apps Script deployment is new
+  // enough to understand it. An older deployment could mistake it for a
+  // whole lead, write a damaged row, or drop the new columns (venue type,
+  // size, quoted/closed), so it waits in the queue until the new script is
+  // deployed. The version is remembered on the phone (every answer from
+  // the script carries it), so this usually costs no extra call.
+  const MIN_SERVER_VERSION = { lead: 5, photo: 2, update: 5, verify: 4, lookup: 5 };
+  let serverVersion = Number(localStorage.getItem(STORE_KEYS.serverVersion)) || 0;
+  function rememberServerVersion(v) {
+    serverVersion = v;
+    try { localStorage.setItem(STORE_KEYS.serverVersion, String(v)); } catch (e) { /* storage full: just ask again next time */ }
+  }
   function checkServerVersion(min) {
     if (serverVersion >= min) return Promise.resolve("ok");
     return timedFetch(`${CONFIG.APPS_SCRIPT_URL}?v=1`, {}, LEAD_TIMEOUT_MS)
       .then((r) => r.json())
       .then((data) => {
-        serverVersion = (data && data.v) || 1;
+        rememberServerVersion((data && data.v) || 1);
         return serverVersion >= min ? "ok" : "rejected";
       }, () => "network");
   }
@@ -988,6 +1266,9 @@
     }, timeoutMs).then((r) => {
       if (!r.ok) throw new Error("bad status");
       return r.json();
+    }).then((data) => {
+      if (data && data.v && data.v !== serverVersion) rememberServerVersion(data.v);
+      return data;
     });
   }
 
@@ -1019,13 +1300,21 @@
 
   const rejectedUntil = {}; // "store:qid" -> time before which we don't re-send it
 
+  // A lead's row and follow-up updates must reach the Sheet in the order
+  // they happened, or an older one could overwrite a newer one. So once
+  // one of them is held back (refused, or waiting to retry), everything
+  // after it for that lead waits too (state.held).
   function drainStore(store, state) {
     return store.keys().catch(() => []).then((keys) => keys.reduce((chain, key) => chain.then(() => {
       if (state.stop) return;
       const tag = `${store.name}:${key}`;
-      if (rejectedUntil[tag] > Date.now()) return;
       return store.get(key).then((item) => {
         if (!item) return; // already sent (e.g. by another open copy of the app)
+        const inOrder = item.kind === "lead" || item.kind === "update";
+        if (state.held.has(item.lead_id) || rejectedUntil[tag] > Date.now()) {
+          if (inOrder) state.held.add(item.lead_id);
+          return;
+        }
         return sendItem(item).then((result) => {
           if (result === "ok") {
             delete rejectedUntil[tag];
@@ -1033,6 +1322,7 @@
           }
           if (result === "network") state.stop = true;
           else rejectedUntil[tag] = Date.now() + REJECTED_PAUSE_MS;
+          if (inOrder) state.held.add(item.lead_id);
         });
       });
     }), Promise.resolve()));
@@ -1050,7 +1340,7 @@
     draining = true;
     drainRequested = false;
     const run = () => {
-      const state = { stop: false };
+      const state = { stop: false, held: new Set() };
       return drainStore(idbStore, state).then(() => drainStore(memStore, state));
     };
     const done = navigator.locks ? navigator.locks.request("ja-queue-drain", run) : run();

@@ -152,6 +152,53 @@ section.tab.active { display: block; }
 .lead-row.done .venue { color: var(--muted); font-weight: 500; }
 .lead-row.done .draft-line::before { content: "✓ "; }
 
+/* The panel that opens under a tapped row: Send, Call, Quoted, Won, Lost */
+.lead-row.open { content-visibility: visible; background: #F3EFE7; }
+
+.row-panel {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row-info {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.row-send {
+  min-height: 48px;
+  border: none;
+  border-radius: 999px;
+  background: var(--send-green);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+.row-send:disabled { background: var(--hairline); color: var(--muted); }
+
+.row-actions {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.row-btn {
+  min-height: 44px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  padding: 0 4px;
+}
+.row-btn.armed { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 #done-heading {
   font-size: 12px;
   text-transform: uppercase;
@@ -273,6 +320,27 @@ nav.bottom-nav {
   gap: 8px;
   flex-wrap: nowrap;
 }
+.chip-row.wrap { flex-wrap: wrap; }
+.chip-row.wrap .chip { flex: 1 1 auto; padding: 0 14px; }
+#site-chips { margin-top: 8px; }
+#source-chips .chip { font-size: 13px; padding: 0 4px; }
+
+select.underline-input {
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 0;
+  /* a small ▾ so it reads as a dropdown */
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236A6455'/%3E%3C/svg%3E") no-repeat right 4px center;
+}
+
+.size-cell { display: flex; flex-direction: column; }
+.size-cell span { font-size: 10px; color: var(--muted); margin-top: 3px; }
+
+.size-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1.3fr;
+  gap: 10px;
+}
 
 .chip {
   flex: 1;
@@ -310,7 +378,7 @@ nav.bottom-nav {
 
 .photo-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
 
@@ -333,7 +401,7 @@ nav.bottom-nav {
 
 .photo-slot {
   width: 100%;
-  height: 58px;
+  height: 64px;
   border: 1px dashed var(--hairline);
   border-radius: 8px;
   position: relative;

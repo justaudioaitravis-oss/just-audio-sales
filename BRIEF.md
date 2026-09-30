@@ -2,14 +2,14 @@
 
 Build a lightweight Progressive Web App for field sales lead capture. I am not a developer — explain what you're doing in plain language and don't assume I can debug.
 
-> **STATUS (updated 28 Sep 2026, end of session): Built, hardened and deployed.** This file describes the app as it actually is, not just as originally requested — read this before making further changes so nothing gets rebuilt or redeployed unnecessarily. **To pick up where we left off, read SESSION LOG, KNOWN ISSUES and NEXT — EFFICIENCY PLAN at the bottom first.**
+> **STATUS (updated 30 Sep 2026): Built, hardened and deployed; a feature round was committed on 30 Sep — see SESSION LOG — 30 SEP for whether it is live yet.** This file describes the app as it actually is, not just as originally requested — read this before making further changes so nothing gets rebuilt or redeployed unnecessarily. **To pick up where we left off, read SESSION LOG, KNOWN ISSUES and NEXT — EFFICIENCY PLAN at the bottom first.**
 >
 > - **Live app:** `https://justaudioaitravis-oss.github.io/just-audio-sales/`
 > - **GitHub repo:** `https://github.com/justaudioaitravis-oss/just-audio-sales` (public repo — GitHub Pages on the free tier requires this, so nothing secret may ever go in it; see PASSCODE LOCK below)
 > - **Google Sheet:** tab named `Leads`, columns match the APPS SCRIPT section below
 > - **Apps Script:** deployed as a Web App, URL pasted into `config.js` → `APPS_SCRIPT_URL`. To ship a script change, edit `apps-script.gs`, paste into the Apps Script editor, then Deploy → Manage deployments → edit → **New version** → Deploy (the live URL does not change, so `config.js` never needs re-editing for a script-only change)
 > - Installed to home screen on the owner's phone, behind a passcode screen checked by the Apps Script (see PASSCODE LOCK)
-> - **Live versions:** app = commit `8429cfd` on GitHub Pages; Apps Script = API version **4** (deployed, `PASSCODE` script property set, 8+ chars); Drive photo folder confirmed private. The owner deleted all Sheet rows on 28 Sep 2026 to start fresh.
+> - **Live versions:** app = commit `8429cfd` on GitHub Pages; Apps Script = API version **4** (deployed, `PASSCODE` script property set, 8+ chars); Drive photo folder confirmed private. The owner deleted all Sheet rows on 28 Sep 2026 to start fresh. **The 30 Sep features need Apps Script version 5 deployed before the app is pushed.**
 > - **Shipping any app change:** deploy Apps Script first (if changed), then upload files. No version bump needed — phones pick up changed files automatically (see OFFLINE)
 
 **Stack constraints (strict):** Plain HTML, CSS and vanilla JavaScript. No React, no Vue, no Tailwind, no npm packages, no build step, no bundler. Total payload under 50KB excluding photos. It must open in under one second on a mid-range Android phone on weak wifi.
@@ -56,44 +56,40 @@ Photos in Drive are private to the script owner by default; don't share the "Jus
 
 Heading: "Follow-ups".
 
-Lists **every lead on this phone**, the moment a visit is logged for it — not only once its reminder is due. Sorted by `next_action_date` ascending (soonest/most-overdue first).
+Lists **every open lead on this phone** (status `new` or `quoted`) from the moment a contact is logged — not only once its reminder is due. Won/lost leads leave the list. Sorted by `next_action_date` ascending (soonest/most-overdue first).
 
 Each row shows two lines:
-- Line 1: venue name, 18px, semibold
-- Line 2: which draft will be sent, 13px, muted, plus timing context:
+- Line 1: venue name, 18px, semibold (muted when not yet due)
+- Line 2: which message is next, 13px, muted, plus timing context:
   - Overdue: `"2-day nudge · 3 days late"`
   - Due today: `"1-week nudge"` (no extra suffix)
-  - Not yet due: `"2-week nudge · due 5 Oct"`
+  - Not yet due: `"2-week quote chase · due 5 Oct"`
 
 Rows are separated by 1px hairlines, not cards.
 
-Leads are never removed from this list, so it grows (~1,000 a year at 5 visits a day). To keep it quick: row labels are computed without building the full WhatsApp message (that happens only on tap), the date formatter is created once, rows are built in a DocumentFragment and swapped in at once, one delegated click listener per list (rows carry `data-id`), and `content-visibility: auto` skips laying out off-screen rows. Measured at 6× CPU throttle (budget Android): 1,000 leads ≈ 45ms to show the list, 3,000 ≈ 100ms (about half what it was). Minifying was measured and skipped: stripping every comment saves ~3KB of compressed download, not worth the readability.
+**Tapping a row opens a panel under it** (one open at a time): an info line (contact · phone · enquiries · venue type · size · quoted date), a full-width green **Send "<message>"** button, and a row of four: **Call** (`tel:` link), **Quoted** ("Requoted" once quoted), **Won**, **Lost**.
 
-**A reminder can only be sent from its due date onward** — rows that are due today or overdue can be tapped; rows not yet due (e.g. the 2-day nudge on the day of the visit) are shown with a muted venue name and do nothing when tapped. (Changed from the original brief, which allowed tapping early.)
+- **Send** works only from the due date onward (before that it is greyed out and reads `"1-week nudge · due 5 Oct"`). It opens `https://wa.me/{phone}?text={encoded message}`, advances `reminder_stage`, sets `next_action_date` = today + the next gap and `last_contacted` = today, and moves the row to "Done today" (faded, tick, `"2-day nudge sent"`) until local midnight. **No undo** — owner's decision on 30 Sep (the original brief required undo). Done rows do nothing when tapped. Queued to the Sheet as `kind: "update"` carrying only those three fields.
+- **Quoted** → `status` = `quoted`, `quoted_on` = today, and reminders restart on the quote-chase track from today (`schedule_anchor` = today, stage 0).
+- **Won / Lost** → `status` = `won`/`lost`, `closed_on` = today, `next_action_date` = "". Reminders stop; the row shows under Done today as "Closed — won/lost" until midnight, then disappears.
+- Quoted, Won and Lost can't be undone, so each needs **two taps**: the first turns the button into an accent-filled "Confirm" for 4 seconds.
 
-**Tapping a due row does three things in this order:**
-1. Opens `https://wa.me/{phone}?text={encoded draft message}` in a new tab
-2. Advances that lead's reminder stage (see REMINDER SCHEDULE below) and recomputes `next_action_date`; sets `last_contacted` to today. These three fields (and only these — never `status` or anything else) are queued to the Sheet as a `kind: "update"` upload; undo queues the restored values the same way
-3. Moves the row to a "done" group at the bottom: faded grey, tick icon, still visible
+Empty state: centred, muted — "No leads yet." (no leads on the phone at all) or "No open leads."
 
-Done rows persist until local midnight and read `"✓ 2-day nudge sent · tap to undo"` — the message that was sent, not the next one (showing the next stage's label made done rows look like a reminder waiting to go out). Tapping a done row **undoes** the push — restores the previous `reminder_stage`/`next_action_date`/`last_contacted`/`status` and returns it to the active list. This undo is important; don't skip it.
-
-Empty state: centred, muted — "No leads yet." (shown only when the phone has zero leads at all, since the list itself is now always-visible/never date-filtered).
+Leads are never deleted from the phone (closed ones are kept for the site chips in New entry), so the list keeps its speed work: row labels computed without building the WhatsApp message, one shared date formatter, rows built in a DocumentFragment, one delegated click listener (rows carry `data-id`; opening a panel touches only that row, with no re-render), and `content-visibility: auto`. Measured at 6× CPU throttle (budget Android, 28 Sep): 1,000 leads ≈ 45ms to show the list, 3,000 ≈ 100ms.
 
 ---
 
 **REMINDER SCHEDULE (automatic — no manual "nudge interval" picker)**
 
-Every visit logged in New Entry (see below) resets a lead's reminder countdown to start counting from that visit's date (`schedule_anchor` = the visit date, `reminder_stage` = 0). The next few reminders fall due on a fixed cadence measured in days from that anchor date — **not** from whenever the previous reminder actually went out:
+An open lead is on one of two tracks, each with its own templates:
 
-- Reminder 1 (stage 0): `REMINDER_SCHEDULE_DAYS[0]` days after the visit — default **2 days**
-- Reminder 2 (stage 1): `REMINDER_SCHEDULE_DAYS[1]` days after the visit — default **1 week**
-- Reminder 3 (stage 2): `REMINDER_SCHEDULE_DAYS[2]` days after the visit — default **2 weeks**
-- Reminder 4 onward (stage 3+): repeats every `MONTHLY_INTERVAL_DAYS` days after that — default **monthly**
+- **Nudges** (status `new`): `nudge_2day`, `nudge_1week`, `nudge_2week`, then `nudge_monthly`. Gaps: `REMINDER_SCHEDULE_DAYS` = **[2, 7, 14]**, then every `MONTHLY_INTERVAL_DAYS` (**30**).
+- **Quote chases** (status `quoted`): `quote_2day`, `quote_1week`, `quote_2week`, then `quote_monthly`. Gaps: `QUOTE_SCHEDULE_DAYS` = **[2, 7, 14]**, then every 30.
 
-Each stage has its own prewritten WhatsApp template (see config.js section below) — `nudge_2day`, `nudge_1week`, `nudge_2week`, `nudge_monthly` — the same way the very first contact message is prewritten per enquiry type. Tapping a Follow-ups row sends whichever template matches the lead's current stage, then advances to the next stage.
+**Each gap counts from the previous message actually sent** (for stage 0: from the contact, or from tapping Quoted). This changed on 30 Sep from the original "days after the visit" anchor. The owner's words: "once the first message is sent, you can only send the next one after 2 days followed by 1 week, 2 weeks and then monthly". So a late reminder never makes the next one due sooner. Labels come from the gaps (`7` → "1-week", `2` → "2-day"; past the end of the list → "Monthly").
 
-If a lead's `status` has been manually set to `"quoted"` (there's no UI control for this yet — it would need to be edited directly in the Sheet, or a future UI added), the `quote_chase` template is used instead of the staged nudge, regardless of stage. *(A phone only learns about a status set in the Sheet when that number goes through the duplicate check again — phones don't pull changes from the Sheet yet; see NEXT — EFFICIENCY PLAN, P2.)*
+Every New entry for a site resets its track to stage 0, counting from that day. A `quoted` site restarts its quote chases; a `won`/`lost` site reopens as `new`.
 
 ---
 
@@ -101,31 +97,32 @@ If a lead's `status` has been manually set to `"quoted"` (there's no UI control 
 
 Heading: "New entry". Fields top to bottom:
 
-1. **Phone.** Static "+91" prefix, then input. `type="tel"`, `inputmode="numeric"`. Accept exactly 10 digits, allow spaces while typing, strip them on save. Store as `+91XXXXXXXXXX`. Largest text on the screen, ~24px. Reject on submit if not 10 digits, with an inline message — no alert() dialogs anywhere in this app.
+1. **Type of contact** — four single-select chips, default "Field visit": Field visit (`visit`) / Walk-in (`walkin`) / Inbound (`inbound`) / Site visit (`site_visit`). Picks the first-message template (`first_<value>`). Saved as `visit_type` (this contact) and, for a new lead, `source` (how it first came in — kept on later contacts).
 
-2. **Contact name** and **Venue name**, side by side on one row, underline-style inputs.
+2. **Phone.** Static "+91" prefix, then input. `type="tel"`, `inputmode="numeric"`. Accept exactly 10 digits, allow spaces while typing, strip them on save. Store as `+91XXXXXXXXXX`. Largest text on the screen, ~24px. Reject on submit if not 10 digits, with an inline message — no alert() dialogs anywhere in this app. Below it: the duplicate-check line and the **site chips** (see DUPLICATE CHECK).
 
-3. **Enquiry** — three chips, single select, default "Sales": Sales / Service / Acoustics. Selected chip is dark fill with light text.
+3. **Contact name** and **Venue name**, side by side on one row, underline-style inputs.
 
-4. **Photos** — labeled, room-based, not a flat row of five anymore:
-   - Room 1 has 5 slots, one per label, in this order: **Front wall, Left wall, Right wall, Back wall, Ceiling**.
-   - A **"+ Add another room"** button appends another room with 6 slots: **Front wall, Left wall, Right wall, Back wall, Ceiling, Overview**. Can be tapped repeatedly for as many rooms as needed.
-   - Labels live in `config.js` (`ROOM_ONE_LABELS`, `EXTRA_ROOM_LABELS`) so they can be changed without touching layout code.
-   - Each slot opens the camera via `<input type="file" accept="image/*" capture="environment">`. Filled slots show the thumbnail with the label underneath; empty slots show a dashed border. Tapping a filled slot offers retake. All photos optional, never block submission.
+4. **Venue type** — dropdown from `CONFIG.VENUE_TYPES`: Hotel, Shack, Restaurant, Bar, Pub, Club, Home (Stereo), Home (Surround), Other. Optional.
 
-5. **Note** — one full-width text input, placeholder "Note — zones, music, deadline". Plain text field so the phone keyboard's own dictation works. Do not build a recorder.
+5. **Venue size (feet)** — Length, Breadth, Height, Area sq ft: four small numeric inputs, each labelled underneath. Area fills itself in as round(L × B) unless typed by hand. All optional; saved as digits and decimal point only.
 
-6. **Submit button** — full width, green, pill-shaped, label reads `Send to +91 98765 43210` using the live value of the phone field.
+6. **Enquiry** — chips from `CONFIG.ENQUIRIES`, **multi-select**, default Sales: Sales / Service / Acoustics / Automation / Rental. Selected chips are dark fill with light text. At least one is required (inline error). Saved as e.g. `"sales, acoustics"`, in config order.
+
+7. **Photos** — room-based: every room has 6 slots, `CONFIG.ROOM_LABELS` = **FRONT WALL, LEFT WALL, RIGHT WALL, BACK WALL, CEILING, OVERVIEW**. Labels are upper-cased in code, so they are always capitals on screen, in uploads and in Drive filenames. Shown 3 per row. **"+ Add another room"** appends another full set and can be tapped repeatedly. Each slot opens the camera via `<input type="file" accept="image/*" capture="environment">`. Filled slots show the thumbnail with the label underneath; empty slots show a dashed border. Tapping a filled slot offers retake. All photos optional, never block submission.
+
+8. **Note** — one full-width text input, placeholder "Note — zones, music, deadline". Plain text field so the phone keyboard's own dictation works. Do not build a recorder.
+
+9. **Submit button** — full width, green, pill-shaped, label reads `Send to +91 98765 43210` using the live value of the phone field.
 
 **On submit, in this order:**
-1. Validate phone. Stop if invalid.
-2. Compress photos (below).
-3. Reset the reminder schedule for this lead: `schedule_anchor` = today, `reminder_stage` = 0, `next_action_date` = today + `REMINDER_SCHEDULE_DAYS[0]`, `last_contacted` = today.
-4. Save the visit to the offline queue on the phone (row + one item per photo), then send in the background (see OFFLINE).
-5. Open WhatsApp with the pre-filled first-contact message (`first_sales` / `first_service` / `first_acoustics`, matching the Enquiry chip) straight away — it does not wait for the upload (it must open within the tap, or phones block it).
-6. Reset the form and switch to the Follow-ups tab.
-
-Send is disabled ("Preparing photos…") while any photo is still compressing. A revisit is matched to an existing lead by the duplicate check, or — if that couldn't run — by the same phone number already on this phone.
+1. Validate phone and at least one enquiry. Stop if invalid.
+2. Photos are already compressed (Send is disabled and reads "Preparing photos…" while any is compressing).
+3. Pick the lead: the selected site chip (this phone's lead, or adopt the Sheet row's `lead_id`/`created_at`/`status`/`source`/`quoted_on`), or a new lead for "+ New site" or an unknown number. If the phone and the Sheet disagree on status, the further-along one wins (new < quoted < won/lost); a won/lost site then reopens as `new`.
+4. Reset its reminders: `schedule_anchor` = today, `reminder_stage` = 0, `last_contacted` = today, `next_action_date` = today + the first gap of its track.
+5. Save to the offline queue (row + one item per photo), then send in the background (see OFFLINE).
+6. Open WhatsApp with `first_<type of contact>` straight away (it must open within the tap, or phones block it). `{services}` = the chosen enquiries' phrases from `CONFIG.ENQUIRIES`, joined as "a, b and c".
+7. Reset the form and switch to the Follow-ups tab.
 
 Never block submission on photos.
 
@@ -135,20 +132,19 @@ Never block submission on photos.
 
 Before upload, in a canvas: resize so the longest edge is max 1600px, export JPEG at quality 0.7. Convert to base64 for the POST. This is not optional — raw phone photos will fail on venue wifi.
 
-Implementation details (as built): the file is read via an object URL (not FileReader), and each photo produces two JPEGs — the 1600px upload and a 192px thumbnail used for the on-screen slot (showing the 1600px image in a 58px slot would hold ~8MB of decoded memory per photo). Canvases are zeroed after use (iPhone memory), and an out-of-memory `"data:,"` result counts as a failure. While any photo is compressing, Send is disabled and reads "Preparing photos…", so a photo can't be dropped or leak into the next visit's form. A photo that can't be decoded leaves the slot as it was with a red "Try again" caption, never blocking submission. Each slot tracks its newest attempt, so a slow earlier shot can't overwrite a quick retake.
+Implementation details (as built): the file is read via an object URL (not FileReader), and each photo produces two JPEGs — the 1600px upload and a 192px thumbnail used for the on-screen slot (showing the 1600px image in a small slot would hold ~8MB of decoded memory per photo). Canvases are zeroed after use (iPhone memory), and an out-of-memory `"data:,"` result counts as a failure. While any photo is compressing, Send is disabled and reads "Preparing photos…", so a photo can't be dropped or leak into the next visit's form. A photo that can't be decoded leaves the slot as it was with a red "Try again" caption, never blocking submission. Each slot tracks its newest attempt, so a slow earlier shot can't overwrite a quick retake.
 
 ---
 
-**DUPLICATE CHECK**
+**DUPLICATE CHECK / OWNERS WITH SEVERAL SITES**
 
-When the phone field loses focus **and** contains 10 valid digits, ask the Apps Script with that number — a passcode-protected POST (`kind: "lookup"`), sent only once the script is known to be version 4+ (see PASSCODE LOCK). The answer is ignored if the phone field changed meanwhile. *(Known weakness: each Apps Script call takes 4–10s, so the answer often arrives after Send — see NEXT — EFFICIENCY PLAN, P1c/P2.)*
+Each site (venue) is its own lead, with its own `lead_id`, Sheet row and reminders. An owner's sites share the phone number.
 
-If a match exists, show one muted line directly below the field:
-`Priya · Anjuna Social · last contacted 12 Mar`
+As soon as the phone field has 10 digits (on input, not on blur), the app shows this number's sites as chips under the phone field. Sites already on this phone appear **instantly**, even offline. They are then merged with the Sheet's rows from a passcode-protected `kind: "lookup"` POST (needs script v5; the answer is ignored if the number changed meanwhile). Chips: one per site (venue name, plus "· won"/"· lost" if closed), newest first, then **"+ New site"**. The newest site is pre-selected unless the rep taps another.
 
-Pre-fill name and venue from the record. On submit, update that lead's row rather than appending a new one — this also means visiting an existing venue again resets its reminder schedule to start from today's new visit (see REMINDER SCHEDULE above), which is intentional: a fresh in-person conversation restarts the follow-up clock. Silent failure if the lookup errors — never block the form on it.
+Above the chips, one muted line: `Priya · Anjuna Social · last contacted 12 Mar` (one site) or `Priya · 2 sites · last contacted 12 Mar`.
 
-If the number is in the Sheet but not on this phone (logged by another rep/phone), the phone adopts that row's `lead_id`, `created_at`, `status` and `source`, so the visit updates the existing row. A `status` found in the Sheet (e.g. `quoted`, set by hand) is always kept, never reset to `new`. If the lookup couldn't run (no signal), the phone falls back to its own lead with the same number, so an offline revisit still doesn't create a duplicate.
+Selecting a site fills in contact name, venue, venue type and size from it. "+ New site" keeps the contact name and clears the venue fields. The lookup fails silently if it errors — never block the form on it. *(Known weakness: each Apps Script call takes 4–10s, so a site known only to the Sheet can appear after Send — see NEXT, P2.)*
 
 ---
 
@@ -160,7 +156,7 @@ Updates are automatic — there is no cache version to bump. On every app open (
 
 Every submit is saved to an offline queue on the phone **first**, then sent — never sent-then-saved-on-failure. The queue lives in **IndexedDB**, not localStorage: localStorage caps at ~5MB, which two photo-heavy visits fill, silently losing leads (this was a real bug in the first build, caught by stress testing).
 
-Each visit is queued as small separate uploads: one `kind: "lead"` item (the Sheet row), then one `kind: "photo"` item per photo, each with a fixed `photo_id`. Items go one at a time, oldest first, and are deleted only after the Apps Script replies `{ok: true}`. No signal / timeout / Google error page → stop and retry later. `{ok: false}` → keep it, carry on with the rest, retry that item after 10 minutes or on next app open. Only one retry runs at a time (plus `navigator.locks` across tabs). Before sending anything an older script wouldn't understand, the app checks the Apps Script's version (`GET ?v=1`, remembered for the session): photos need v2+, Follow-ups updates v3+, passcode checks and duplicate lookups v4+ — so an out-of-date deployment can never receive a request it would misread as a lead and write a damaged row. The passcode is added to each request at send time (never stored in queued items); an `auth` refusal re-locks the app and the item waits; a `busy` answer (Sheet lock timed out) retries within a minute instead of pausing 10.
+Each visit is queued as small separate uploads: one `kind: "lead"` item (the Sheet row), then one `kind: "photo"` item per photo, each with a fixed `photo_id`. Items go one at a time, oldest first, and are deleted only after the Apps Script replies `{ok: true}`. No signal / timeout / Google error page → stop and retry later. `{ok: false}` → keep it, carry on with the rest, retry that item after 10 minutes or on next app open. Only one retry runs at a time (plus `navigator.locks` across tabs). Before sending anything, the app checks the Apps Script's version: leads, updates and lookups need **v5+**, photos v2+, passcode checks v4+. An out-of-date deployment therefore never receives a request it would misread, or save without the new columns; the item waits in the queue and is retried after 10 minutes or on the next app open. The version is **remembered in localStorage** (`ja_server_v`) and refreshed from the `v` on every script answer, so the `GET ?v=1` call only happens when the remembered version is too old. A lead's row and its updates reach the Sheet **in order**: once one is held back (refused or waiting to retry), later items for that lead wait too in that pass. The passcode is added to each request at send time (never stored in queued items); an `auth` refusal re-locks the app and the item waits; a `busy` answer (Sheet lock timed out) retries within a minute instead of pausing 10.
 
 Retries run on app load, on `window.online`, when the app comes back to the foreground (e.g. returning from WhatsApp), and every minute while open. Anything left in the old localStorage queue (`ja_queue`) from the first build is moved to IndexedDB on load. While anything is queued, the Follow-ups tab shows a badge counting visits with something still to send: "2 waiting". Clears when the queue drains.
 
@@ -176,49 +172,9 @@ On first open (after the passcode screen), show a single full-screen prompt: "Yo
 
 **config.js**
 
-Every value I might change lives here and nowhere else. Comment each one in plain English.
+Every value I might change lives here and nowhere else. Comment each one in plain English. Current keys: `APPS_SCRIPT_URL`, `BROCHURE_URL` (one brochure for all services), `COMPANY_NAME`, `REMINDER_SCHEDULE_DAYS`, `MONTHLY_INTERVAL_DAYS`, `QUOTE_SCHEDULE_DAYS`, `ENQUIRIES` (key → phrase used in `{services}`), `VENUE_TYPES`, `ROOM_LABELS`, and `TEMPLATES`: `first_visit`, `first_walkin`, `first_inbound`, `first_site_visit`, `nudge_2day`, `nudge_1week`, `nudge_2week`, `nudge_monthly`, `quote_2day`, `quote_1week`, `quote_2week`, `quote_monthly`, `survey_offer`. Placeholders: `{name} {venue} {brochure} {rep} {company} {services}`. There is no passcode here — it lives in the Apps Script's Script Properties (see PASSCODE LOCK), because this file is public.
 
-```js
-const CONFIG = {
-  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycby0FDcwHB7LoKkEqs1MaOE2JD7WDHg5nsArNaB6ZLxOWmn3IXLqrQiXtcvQuoI9eSVI/exec",
-
-  // (No PASSCODE here — it lives in the Apps Script's Script Properties;
-  //  see PASSCODE LOCK above. This file is public.)
-
-  // Brochure links — one per enquiry type.
-  // Set all three to the same URL if there is only one page.
-  BROCHURE: {
-    sales:     "BROCHURE_URL_SALES_PLACEHOLDER",
-    service:   "BROCHURE_URL_SERVICE_PLACEHOLDER",
-    acoustics: "BROCHURE_URL_ACOUSTICS_PLACEHOLDER"
-  },
-
-  COMPANY_NAME: "Just Audio",
-
-  // See REMINDER SCHEDULE section above.
-  REMINDER_SCHEDULE_DAYS: [2, 7, 14],
-  MONTHLY_INTERVAL_DAYS: 30,
-
-  // See TAB 2 — NEW ENTRY, photos, above.
-  ROOM_ONE_LABELS: ["Front wall", "Left wall", "Right wall", "Back wall", "Ceiling"],
-  EXTRA_ROOM_LABELS: ["Front wall", "Left wall", "Right wall", "Back wall", "Ceiling", "Overview"],
-
-  // {name} {venue} {brochure} {rep} {company} are replaced at send time
-  TEMPLATES: {
-    first_sales: "...",
-    first_service: "...",
-    first_acoustics: "...",
-    nudge_2day: "...",
-    nudge_1week: "...",
-    nudge_2week: "...",
-    nudge_monthly: "...",
-    quote_chase: "...",
-    survey_offer: "..."
-  }
-};
-```
-
-All nine templates should read warm, plain Indian English, no exclamation marks, no emoji, under 60 words each. The `first_sales` one should promise a quote and offer a free site survey.
+All templates should read warm, plain Indian English, no exclamation marks, no emoji, under 60 words each. The first messages promise a quote and offer a free site survey (the site-visit one says the quote is on its way).
 
 **Critical:** when building the `wa.me` URL, encode the whole message with `encodeURIComponent`. Line breaks must be real `\n` in the template and must survive encoding as `%0A`. A message arriving as one unbroken paragraph is a bug.
 
@@ -228,17 +184,19 @@ All nine templates should read warm, plain Indian English, no exclamation marks,
 
 The complete Google Apps Script lives in `apps-script.gs`:
 
-- `doPost` — append a new row, or update the existing row when `lead_id` is supplied. Accepts `kind: "lead"` (row only), `kind: "photo"` (one photo; skipped if its `photo_id` was already saved; links the venue folder into the row), and the first build's single all-in-one payload (row + `photos` list). Runs under a script lock (`tryLock(30000)`); if the lock can't be had, returns `{ok: false, busy: true}`, which the app treats like a network failure (retry shortly) rather than a refusal. Row lookups (`lead_id`, and `phone` for the duplicate check) read only that one column, not the whole sheet. Requires the passcode (`key`) — see PASSCODE LOCK. Also handles `kind: "verify"` (passcode check) and `kind: "lookup"` (duplicate check). Always returns `{ok: true, v: 4}` or `{ok: false, error}`
-- `doPost` `kind: "update"` — Follow-ups tap/undo: writes only `reminder_stage`, `next_action_date`, `last_contacted`; `{ok: false}` if the row doesn't exist yet (app retries). Unknown `kind` values are refused. *(Known bug: if the row was deleted from the Sheet by hand, this update is refused forever and the "1 waiting" badge never clears — see KNOWN ISSUES.)*
-- `doGet ?v=1` — returns `{ok: true, v: 4}` (API version check; the app needs v2+ before sending photos, v3+ before sending updates, v4+ before a passcode check or lookup). `doGet` returns nothing else.
-- Photo handling — decode base64, save into a Drive folder named after the venue (inside one root folder, `Just Audio - Lead Photos`), with a subfolder per room (`Room 1`, `Room 2`, ...), each photo filed under its label as the filename (e.g. `Front wall.jpg`); write the venue folder's URL into the row
+- `doPost` — append a new row, or update the existing row when `lead_id` is supplied. Accepts `kind: "lead"` (row only), `kind: "photo"` (one photo; skipped if its `photo_id` was already saved; links the venue folder into the row), and the first build's single all-in-one payload (row + `photos` list). Runs under a script lock (`tryLock(30000)`); if the lock can't be had, returns `{ok: false, busy: true}`, which the app treats like a network failure (retry shortly) rather than a refusal. Row lookups (`lead_id`, and `phone` for the duplicate check) read only that one column, not the whole sheet. Requires the passcode (`key`) — see PASSCODE LOCK. Also handles `kind: "verify"` (passcode check) and `kind: "lookup"` (duplicate check). Always returns `{ok: true, v: 5}` or `{ok: false, error}`
+- `doPost` `kind: "update"` — Follow-ups Send/Quoted/Won/Lost: writes only the fields present, from the allow-list `reminder_stage`, `next_action_date`, `last_contacted`, `schedule_anchor`, `status`, `quoted_on`, `closed_on` (plus `updated_at`). If the row doesn't exist (deleted by hand), it answers `{ok: true, missing: true}` so the phone stops retrying. This is safe because the app always sends a lead's row before its updates. Unknown `kind` values are refused.
+- `kind: "lookup"` returns `records`: up to 20 rows for that phone, newest first, each with only `lead_id`, `created_at`, `contact_name`, `venue`, `last_contacted`, `status`, `source`, `venue_type`, `length_ft`, `breadth_ft`, `height_ft`, `area_sqft`, `quoted_on` (plus `record` = the newest, for older app copies).
+- Lead upserts keep the Sheet's existing value for any column the upload leaves out, and stamp `updated_at`. The header row is extended automatically if the Sheet has fewer columns than the script.
+- `doGet ?v=1` — returns `{ok: true, v: 5}` (API version check). `doGet` returns nothing else.
+- Photo handling — decode base64, save into a Drive folder named after the venue (inside one root folder, `Just Audio - Lead Photos`), with a subfolder per room (`Room 1`, `Room 2`, ...), each photo filed under its label as the filename (e.g. `FRONT WALL.jpg`); write the venue folder's URL into the row
 - CORS handled correctly for GitHub Pages
 - Return JSON always, never HTML
 
 **Sheet columns, in this exact order:**
-`lead_id` · `created_at` · `rep` · `phone` · `contact_name` · `venue` · `enquiry` · `visit_date` · `note` · `photo_folder` · `reminder_stage` · `schedule_anchor` · `next_action_date` · `last_contacted` · `status` · `source`
+`lead_id` · `created_at` · `rep` · `phone` · `contact_name` · `venue` · `enquiry` · `visit_date` · `note` · `photo_folder` · `reminder_stage` · `schedule_anchor` · `next_action_date` · `last_contacted` · `status` · `source` · `venue_type` · `length_ft` · `breadth_ft` · `height_ft` · `area_sqft` · `visit_type` · `quoted_on` · `closed_on` · `updated_at`
 
-`lead_id` is a timestamp-based string. `phone` is always `+91XXXXXXXXXX`. Dates are `YYYY-MM-DD`. `reminder_stage` is an integer (0 = no reminders sent since the last visit yet). `schedule_anchor` is the visit date the reminder countdown resets from. `status` starts as `new` (manually settable to `quoted` to switch that lead's Follow-ups draft to the quote-chase template). `source` is `visit` or `qr`.
+The last nine were added in v5, **appended at the end** so the original order is kept. One row per site. `lead_id` is a timestamp-based string. `phone` is always `+91XXXXXXXXXX`. Dates are `YYYY-MM-DD`; `updated_at` is `YYYY-MM-DD HH:mm:ss` (script time zone), set by the script. `enquiry` is a comma-separated list (`sales, service, acoustics, automation, rental`). `reminder_stage` is an integer (0 = nothing sent yet on the current track). `schedule_anchor` is when the current track started. `status` is `new`, `quoted`, `won` or `lost` (set by the Follow-ups buttons, or edited by hand). `source` is how the lead first came in and `visit_type` is the latest contact: `visit`, `walkin`, `inbound` or `site_visit` (old rows may say `qr`).
 
 Every cell is written as **plain text** (number format `@`) except `reminder_stage` — otherwise Google Sheets converts values on write (`+91…` → a number, dates → date objects, notes starting `=`/`+` → formulas), which broke the duplicate check. The duplicate lookup also normalises rows written before this fix (numeric phones/lead_ids, Date cells) back to the formats above, matches phones on their last 10 digits, and returns the newest matching row.
 
@@ -282,14 +240,35 @@ A full review → fix → stress-test pass, shipped in these commits (all pushed
 
 ---
 
+**SESSION LOG — 30 SEP 2026**
+
+The owner's feature round, plus fixes from the plan below. **Committed locally. Not live until the owner deploys Apps Script v5 and the app is pushed** — update the Live versions line at the top once that's done.
+
+- Multiple enquiries per lead; Automation and Rental added. A single `first_<contact type>` template with `{services}` replaces the three per-enquiry first messages.
+- Single brochure (`BROCHURE_URL`).
+- Type of contact chips (Field visit / Walk-in / Inbound / Site visit). The owner asked for "a section for inbound/walk in clients or site visit clients". It was built as chips at the top of New entry rather than a third tab: this keeps the two-tab layout, and photos/size stay optional for walk-ins.
+- Venue type dropdown; venue size L/B/H/area (feet; area = L × B automatically).
+- 6 photos per room, labels in capitals (`ROOM_LABELS`).
+- Owners with multiple sites: one lead per site, site chips + "+ New site"; the lookup returns every row for the number.
+- Follow-ups: tap-to-open panel (Send / Call / Quoted / Won / Lost). **Undo removed** (reverses the 28 Sep decision to keep it). Gaps count from the previous send. A quote-chase track with its own 4 templates. Won/Lost close the lead. Quoted/Won/Lost need a confirming second tap.
+- Fixed KNOWN ISSUE 1 (stuck "1 waiting" for rows deleted by hand), and a lead's queued items now go in order.
+- Done from the efficiency plan: P1b (script version remembered on the phone), P1c (lookup at the 10th digit, local sites instantly and offline), and the P4 guard (`saveLeads` can't throw).
+- Tests: the 28 Sep harness was lost with its temporary folder. A smaller replacement is kept outside the repo at `~/Desktop/jasalesapp-tests`:
+  - `gas-sim.js` runs the real `apps-script.gs` on a fake Sheet and Drive.
+  - `e2e.js` runs 44 checks in headless Chrome: all the new features, the other-phone site lookup, an update for a deleted row, old-script gating, and offline with the app closed.
+  - `shots.js` takes phone-size screenshots.
+
+  To run: `cd ~/Desktop/jasalesapp-tests && npm i puppeteer-core@23 && node e2e.js`. 10 of 11 runs passed cleanly. One run stopped early and did not happen again — most likely a timing wait in the test itself.
+
 **KNOWN ISSUES (open, not yet fixed)**
 
-1. **Stuck "1 waiting" after deleting Sheet rows by hand.** A Follow-ups tap on a lead whose row was deleted produces an update the script refuses forever (`No row for lead_id`); the phone keeps retrying. The owner deleted all rows on 28 Sep 2026, so any old test leads still on the phone would trigger this when their reminder comes due. Fix: script answers `{ok: true, missing: true}` for an update with no row (or the app drops an update refused with "No row").
-2. **No way to remove leads from a phone.** Old/test leads stay in Follow-ups forever. Fixed properly by P2 (sync down) — or a small remove/archive control (owner to decide).
-3. **Duplicate check usually loses the race.** Each Apps Script call takes 4–10s (measured), and the first lookup of a session costs two calls (version check + lookup), so the rep has often pressed Send before the answer arrives → a revisit of a lead logged on *another* phone can still create a second row. See P1b, P1c, P2.
-4. **Phones don't learn about Sheet changes** (status set to `quoted` by hand, rows deleted, other reps' leads) except via the duplicate check. See P2.
-5. **localStorage leads have a ceiling.** ~380 bytes per lead (measured) → Safari's ~5MB cap is reached somewhere around 6,000+ leads (years away), and `saveLeads` isn't guarded: if it ever throws, submit fails before the visit is queued. See P4.
-6. **App files over the 50KB raw target** (~60KB raw / ~18KB compressed) — accepted for readability.
+1. ~~Stuck "1 waiting" after deleting Sheet rows by hand~~ — fixed 30 Sep (the script answers `missing: true`).
+2. **No way to remove leads from a phone** except closing them (Won/Lost hides them from Follow-ups), so old test leads can be closed as Lost. Proper cleanup still needs P2.
+3. **Sites known only to the Sheet can arrive after Send.** Each Apps Script call takes 4–10s. Sites on this phone now appear instantly and the lookup starts at the 10th digit, but a site logged only on *another* phone can still be missed if the rep is quick → a second row. See P2.
+4. **Phones don't learn about Sheet changes** (status edited by hand, rows deleted, other reps' leads) except through the site lookup. See P2 — the new `updated_at` column is ready for it.
+5. **localStorage leads have a ceiling** (~380 bytes per lead → ~6,000+ leads on Safari). `saveLeads` is now guarded, so a full storage can't stop a visit being queued; moving leads to IndexedDB is still P4.
+6. **App files over the 50KB raw target** — accepted for readability.
+7. **Old-script retry delay.** If the app is pushed before Apps Script v5 is deployed, entries wait in the queue and only retry every 10 minutes or on app reopen. Harmless, but deploy the script first.
 
 ---
 
@@ -301,28 +280,28 @@ Owner's direction: **efficiency over everything.** Ordered by measured impact. N
 
 **P1 — Cut Apps Script round trips (biggest win).** Today a visit with 11 photos = 12 POSTs (+1 version GET per session) ≈ 1–2+ minutes of uploading on good signal; each Follow-ups tap = 1 call; first unlock = 2 calls; first duplicate check of a session = 2 calls.
 - **P1a Batch uploads:** a `kind: "batch"` request carrying several queue items (row + photos up to ~1–1.5MB, plus any queued updates) with a per-item result, so partial success still deletes what landed; photos stay idempotent via `photo_id`. Shrink the batch automatically after a timeout (weak wifi). Expected: 12 calls → ~3–4 per visit.
-- **P1b Remember the script version** in localStorage (every response already carries `v`), re-checking only when a gated request fails — removes one 4–10s call per app open, and makes first unlock and the first lookup one call each.
-- **P1c Start the duplicate check at the 10th digit** (on input, not on blur) — gains the seconds spent typing name/venue.
+- ~~**P1b Remember the script version**~~ (done 30 Sep) in localStorage (every response already carries `v`), re-checking only when a gated request fails — removes one 4–10s call per app open, and makes first unlock and the first lookup one call each.
+- ~~**P1c Start the duplicate check at the 10th digit**~~ (done 30 Sep) (on input, not on blur) — gains the seconds spent typing name/venue.
 - **P1d Less work per photo in the script** (not yet measured — add a timing field to responses or read the Executions log first): each photo currently does ~5 Drive name searches (root, venue and room folders, same-name files for de-dup) plus Sheet reads/writes. Cache folder IDs (CacheService / Script Properties → `getFolderById`), de-dup via a CacheService `photo_id` record before falling back to search, write the `photo_folder` cell once per lead, and hold the script lock only for Sheet writes and folder creation (not the Drive file upload) so several reps' uploads don't queue behind each other.
 - **P1e Wrong-passcode delay** (1.5s `sleep`) occupies one of Apps Script's ~30 concurrent executions; a flood of bad requests could slow real uploads. Only sleep when recent failures spike (CacheService counter).
 
-**P2 — Pull changes from the Sheet ("sync down").** One call on app open (when idle, with signal) returning leads changed since the last pull — needs an `updated_at` column **appended at the end** of the sheet so the existing column order is kept. Makes the duplicate check instant and offline (no lookup calls), brings hand-set `quoted` statuses to phones, removes rows deleted in the Sheet (fixes KNOWN ISSUES 1 and 2), and lets phones know other reps' leads. **Owner decision needed:** every phone would then hold the team's contact list (privacy trade-off) — options include syncing only this rep's leads plus a phone-number index for the duplicate check.
+**P2 — Pull changes from the Sheet ("sync down").** One call on app open (when idle, with signal) returning leads changed since the last pull — uses the `updated_at` column (added 30 Sep). Makes the duplicate check instant and offline (no lookup calls), brings hand-set `quoted` statuses to phones, removes rows deleted in the Sheet (fixes KNOWN ISSUES 1 and 2), and lets phones know other reps' leads. **Owner decision needed:** every phone would then hold the team's contact list (privacy trade-off) — options include syncing only this rep's leads plus a phone-number index for the duplicate check.
 
 **P3 — Photo pipeline on the phone.** Switch `toDataURL` → async `toBlob` (≈136ms → ≈29ms of frozen screen per photo; ~1.5s → ~0.3s across 11 photos); store Blobs in IndexedDB (queue ~25% smaller) and convert to base64 only when sending; optionally resize in a Web Worker (`createImageBitmap` + `OffscreenCanvas`; Chrome, Safari 16.4+) for zero screen freeze. Base64's +33% on the wire can't be avoided with Apps Script (it only accepts text bodies; binary bodies would need a CORS preflight Apps Script can't answer). **Owner decision:** 1280px / quality 0.65 would cut uploads ~35–40% vs the brief's 1600px / 0.7.
 
-**P4 — Phone storage.** Guard `saveLeads` now (try/catch so a full storage can never stop a visit being queued); move leads into IndexedDB alongside P2.
+**P4 — Phone storage.** ~~Guard `saveLeads`~~ (done 30 Sep); move leads into IndexedDB alongside P2.
 
 **P5 — Follow-ups list growth.** Update only the tapped row instead of re-rendering the whole list; **owner decision:** archive leads (e.g. after N monthly nudges, or a won/lost status) or collapse not-due-for-2-weeks leads into a "Later (N)" group.
 
 **P6 — Small wins.** Service worker re-checks 8 files on every open (background, ~0.1s each) — skip icons/manifest or check at most hourly; the every-minute retry timer only while something is queued; refresh the badge once per drain instead of per item.
 
-Suggested order: KNOWN ISSUE 1 fix (tiny) → P1b + P1c (small, app-only) → P1a + P1d (script + app) → P3 → P2 (needs owner decisions) → P4/P5/P6.
+Suggested order now: P1a + P1d (script + app) → P3 → P2 (needs owner decisions) → P4/P5/P6.
 
 ---
 
 **TESTING**
 
-Every change this session was stress-tested with a harness that is **not in this repo** (the repo is public and GitHub Pages serves every file in it). It ran from a temporary session folder, which will be deleted — **save a copy outside the repo if you want to keep it** (e.g. `~/Desktop/jasalesapp-tests`). It uses `puppeteer-core` driving the locally installed Chrome — npm is used only for the tests, never in the app.
+*(The 28 Sep harness described below was lost with its temporary folder. Its 30 Sep replacement is at `~/Desktop/jasalesapp-tests` — see SESSION LOG — 30 SEP.)* Every 28 Sep change was stress-tested with a harness that is **not in this repo** (the repo is public and GitHub Pages serves every file in it). It ran from a temporary session folder, which will be deleted — **save a copy outside the repo if you want to keep it** (e.g. `~/Desktop/jasalesapp-tests`). It uses `puppeteer-core` driving the locally installed Chrome — npm is used only for the tests, never in the app.
 
 - `gas-sim.js` — runs the real `apps-script.gs` in Node against a fake Sheet (converts values like real Sheets unless cells are plain text), fake Drive, Lock, Cache/Properties, Utilities.
 - `servers.js` — serves the real app files, plus a fake Apps Script server running the real script with Google-style 302 redirects and switchable faults: dropped connections, saved-but-reply-lost, 500 error pages, delays, refused items, busy lock, older script versions.

@@ -7,23 +7,19 @@ This file explains the things you're most likely to need later.
 
 ---
 
-## 1. Changing the brochure links
+## 1. Changing the brochure link
 
-Open `config.js` in any text editor (even Notes or a basic code editor works —
-you don't need anything special). Near the top you'll see:
+There is one brochure for all services. Open `config.js` in any text editor
+(even Notes or a basic code editor works). Near the top you'll see:
 
 ```js
-BROCHURE: {
-  sales:     "BROCHURE_URL_SALES_PLACEHOLDER",
-  service:   "BROCHURE_URL_SERVICE_PLACEHOLDER",
-  acoustics: "BROCHURE_URL_ACOUSTICS_PLACEHOLDER"
-},
+BROCHURE_URL: "BROCHURE_URL_PLACEHOLDER",
 ```
 
-Replace each placeholder with the real web link, keeping the quote marks, e.g.:
+Replace the placeholder with the real web link, keeping the quote marks, e.g.:
 
 ```js
-sales: "https://justaudio.example.com/brochure",
+BROCHURE_URL: "https://justaudio.example.com/brochure",
 ```
 
 Save the file. If it only lives on GitHub Pages, you'll need to re-upload the
@@ -44,10 +40,18 @@ that gets pre-filled into WhatsApp. A few rules:
 - Keep the `+` signs joining the lines together, and the quote marks around
   the text.
 
-There are now separate templates for each stage of the automatic follow-up
-schedule (see section 3 below) — `nudge_2day`, `nudge_1week`, `nudge_2week`,
-and `nudge_monthly` — plus the three first-contact ones (`first_sales`,
-`first_service`, `first_acoustics`). Edit any of them the same way, e.g.:
+There are four kinds of template:
+
+- **First message**, sent the moment a New entry is saved — one per type of
+  contact: `first_visit`, `first_walkin`, `first_inbound`, `first_site_visit`.
+  `{services}` becomes the enquiries you picked, e.g. "a new sound system
+  and acoustic treatment" (the words for each are under `ENQUIRIES`).
+- **Reminders**: `nudge_2day`, `nudge_1week`, `nudge_2week`, `nudge_monthly`.
+- **Quote chases**, used once a lead is marked Quoted: `quote_2day`,
+  `quote_1week`, `quote_2week`, `quote_monthly`.
+- `survey_offer`, not sent automatically.
+
+Edit any of them the same way, e.g.:
 
 ```js
 nudge_2day: "Hi {name}, this is {rep} from {company}, checking in on {venue}.",
@@ -57,33 +61,63 @@ Save the file and re-upload it the same way as above.
 
 ---
 
-## 3. Changing the follow-up schedule
+## 3. Follow-ups: reminders, Quoted, Won and Lost
 
-Also in `config.js`, this section controls how many days after a visit each
-automatic reminder is due:
+Tap a lead in Follow-ups to open its buttons:
+
+- **Send …** — opens WhatsApp with the reminder that's due. Greyed out until
+  its day arrives. **A sent reminder can't be undone.**
+- **Call** — phones the contact.
+- **Quoted** — tap once you've sent a quote. The lead switches to quote
+  chases, counting from today. If you send a revised quote, tap it again
+  (it now says "Requoted") to restart them.
+- **Won** / **Lost** — closes the lead: its reminders stop and it leaves the
+  list (it shows under "Done today" until midnight).
+
+Quoted, Won and Lost can't be undone either, so each needs **two taps**: the
+first turns the button into "Confirm", the second does it.
+
+Logging a New entry for a site again restarts its reminders from that day —
+and reopens it if it was won or lost.
+
+### Changing the schedule
+
+In `config.js`:
 
 ```js
 REMINDER_SCHEDULE_DAYS: [2, 7, 14],
+QUOTE_SCHEDULE_DAYS: [2, 7, 14],
 MONTHLY_INTERVAL_DAYS: 30,
 ```
 
-By default: the first reminder is due 2 days after a visit, the second a
-week after, the third two weeks after, and then it repeats every 30 days
-after that for as long as the lead stays open. To change the cadence,
-edit the numbers in the list (and the monthly number if you want a
-different repeat gap), save, and re-upload.
-
-Each visit resets this countdown — so if you visit the same venue again,
-the schedule starts over from that new visit date.
-
-A reminder can only be sent once its day arrives. Until then the lead still
-shows in Follow-ups (with its due date, venue name in grey) so you can see
-what's coming, but tapping it does nothing. Once it's due — or if it's
-overdue — tap it to send.
+Each number is the gap in days **since the previous message was sent**. So
+by default: the first reminder 2 days after the first message, the next a
+week after that reminder was sent, the next two weeks after that, then every
+30 days. Quote chases work the same way, counting from the day you tap
+Quoted. If one goes out late, the next one still waits its full gap.
 
 ---
 
-## 4. Changing the passcode
+## 4. New entry: type of contact, sites, venue details
+
+- **Type of contact** — Field visit, Walk-in, Inbound (a call or message)
+  or Site visit. It picks which first message is sent, and is saved in the
+  Sheet (`source` = how the lead first came in, `visit_type` = this contact).
+- **Owners with several sites** — each venue is its own lead with its own
+  Sheet row and reminders; they share the owner's phone number. Once you
+  type a number that's already known, its sites appear as buttons under the
+  phone field, with the newest picked. Tap a different site if this is
+  about that one, or **+ New site** for a venue not logged yet (the contact
+  name stays, the venue details clear).
+- **Venue type** — a dropdown; edit the list under `VENUE_TYPES` in `config.js`.
+- **Venue size** — length, breadth and height in feet. Area fills itself
+  in as length × breadth; type over it if the room isn't a rectangle.
+- **Enquiry** — tap as many as apply; at least one is needed. Edit the list
+  under `ENQUIRIES` in `config.js`.
+
+---
+
+## 5. Changing the passcode
 
 The passcode is **not** in the app's files — those are public on GitHub, so
 anything in them can be read by anyone. It's kept in the Apps Script's
@@ -116,15 +150,13 @@ the new one only to the people who should still have access.
 
 ---
 
-## 5. The photo rooms
+## 6. The photo rooms
 
-Each lead gets one "Room 1" of 5 labelled photo slots (Front wall, Left
-wall, Right wall, Back wall, Ceiling) built in automatically. Tapping
-"+ Add another room" adds a further set of 6 labelled slots (the same 5,
-plus an Overview shot) for a second room, and so on for as many rooms as
-needed. All photos are optional and never block submission. To change the
-labels themselves, edit `ROOM_ONE_LABELS` and `EXTRA_ROOM_LABELS` in
-`config.js`.
+Every room has 6 labelled photo slots: FRONT WALL, LEFT WALL, RIGHT WALL,
+BACK WALL, CEILING, OVERVIEW. Tapping "+ Add another room" adds another set
+for a second room, and so on for as many rooms as needed. All photos are
+optional and never block submission. To change the labels, edit
+`ROOM_LABELS` in `config.js` — they're always shown and saved in capitals.
 
 In the Google Drive folder, photos are organised as: **Just Audio - Lead
 Photos** → venue name → Room 1 / Room 2 / etc. → one file per label.
@@ -140,7 +172,7 @@ just leave it; it never blocks sending.
 
 ---
 
-## 6. Exporting the sheet to Excel
+## 7. Exporting the sheet to Excel
 
 (Note: the app saves every cell as plain text, except `reminder_stage`, so
 phone numbers keep their `+91` and dates stay as `2026-09-28`. Rows saved
@@ -156,7 +188,7 @@ You can do this any time, as often as you like — it never affects the live dat
 
 ---
 
-## 7. If a submission doesn't appear in the sheet
+## 8. If a submission doesn't appear in the sheet
 
 The app is built to never lose a submission, even with no signal — but here's
 how to check:
@@ -194,14 +226,14 @@ how to check:
    can occasionally take a little longer to finish uploading.
 
 5. **Check the passcode.** If a phone keeps showing the passcode screen, the
-   passcode was probably changed — enter the new one (see section 4).
+   passcode was probably changed — enter the new one (see section 5).
    Nothing waiting to send is lost meanwhile.
 
-6. **Check the Apps Script is the latest version.** Photos, and the
-   updates sent when you tap a Follow-ups row, are only sent once the Apps
-   Script deployment is new enough to understand them. If Sheet rows are
-   arriving but photos or follow-up dates never change, and the badge stays
-   on, the newest `apps-script.gs` probably hasn't been deployed yet. See
+6. **Check the Apps Script is the latest version.** The app only sends
+   things once the Apps Script deployment is new enough to understand them
+   (this version of the app needs Apps Script version 5). If the badge stays
+   on with good signal and nothing new reaches the Sheet, the newest
+   `apps-script.gs` probably hasn't been deployed yet. See
    "Shipping an update" below.
 
 If none of that explains it, the safest next step is to ask whoever set this
@@ -211,7 +243,7 @@ went wrong.
 
 ---
 
-## 8. Shipping an update
+## 9. Shipping an update
 
 When anything in the app changes, do these in this order:
 
