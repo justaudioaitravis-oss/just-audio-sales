@@ -723,6 +723,7 @@
   let watchId = null;
   let locateTimer = null;
   let locating = false;
+  let mapWanted = false; // show the map preview for the current pin?
   const GOOD_ENOUGH_M = 20;
   const LOCATE_MAX_MS = 60000;
 
@@ -759,7 +760,21 @@
     const refining = locating ? " · improving…" : "";
     locationLine.append(`${locationText(pinned)}${pinned.acc ? ` · ±${Math.round(pinned.acc)} m` : ""}${refining} · `, link);
     locationLine.classList.remove("hidden");
-    // A small OpenStreetMap preview (free, no key) — only with signal.
+    // A small OpenStreetMap preview (free, no key) — only with signal, and
+    // only once the rep asks for it: straight away after pinning, or by
+    // tapping "Show map" for a location filled in from a saved site. That
+    // way a site's coordinates only go to OpenStreetMap when someone
+    // actually wants to see the map, not every time its number is typed.
+    if (!mapWanted) {
+      locationMap.classList.add("hidden");
+      locationMap.removeAttribute("src");
+      const show = document.createElement("a");
+      show.href = "#";
+      show.textContent = "Show map";
+      show.addEventListener("click", (e) => { e.preventDefault(); mapWanted = true; showPinned(); });
+      locationLine.append(" · ", show);
+      return;
+    }
     if (navigator.onLine !== false) {
       const d = 0.002;
       const src = "https://www.openstreetmap.org/export/embed.html?bbox=" +
@@ -792,6 +807,7 @@
       return;
     }
     locating = true;
+    mapWanted = true;
     locateBtn.textContent = "Finding location… tap to stop";
     locationMessage("Finding location — the first fix can take up to a minute indoors.");
     const startedWith = pinned;
@@ -855,6 +871,7 @@
     if (locating) stopLocating();
     const m = record && String(record.location || "").match(/(-?[\d.]+),\s*(-?[\d.]+)/);
     pinned = m ? { lat: Number(m[1]), lng: Number(m[2]), acc: Number(record.location_accuracy_m) || 0 } : null;
+    mapWanted = false;
     const link = record ? String(record.map_link || "") : "";
     mapLinkInput.value = link && !(pinned && link === mapsUrl(locationText(pinned))) ? link : "";
     stopLocating();

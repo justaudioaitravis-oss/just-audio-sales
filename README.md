@@ -125,7 +125,17 @@ Quoted. If one goes out late, the next one still waits its full gap.
   outdoors), a small map when there's signal, and an "Open in Maps" link.
   Tap the button again to stop early. If it can't get a location, it says
   why and how to fix it (e.g. location switched off or blocked for the
-  app). For a walk-in, open the
+  app).
+
+  **Who can see locations:** only people with the passcode (in the app)
+  and people you share the Google Sheet with. They are never public. To
+  draw the small map, the phone asks OpenStreetMap (a free map service)
+  for the map around that spot, so their servers see the coordinates and
+  the phone's internet address, like any website visit — but not the
+  customer's name, number or anything else. The map is locked down: it
+  can't read or change the app, open anything, use the camera or
+  location, or get cookies. For a saved site, the map only loads when
+  you tap **Show map**. For a walk-in, open the
   venue in Google Maps, Share → Copy link, and paste it into the box
   instead. The Sheet gets the coordinates and a Google Maps link.
 - **Enquiry** and **Type of music** — tap as many as apply (at least one

@@ -46,6 +46,8 @@ Because GitHub Pages on the free tier can only serve public sites, everything in
 
 The app shows a full-screen passcode prompt before anything else (including the rep name prompt) until the script accepts a passcode, then stores it in localStorage (`ja_key`) and sends it with every request — added at send time, never stored inside queued items. The first unlock needs signal; wrong code / no signal / script not set up / script too old each show their own inline message, no `alert()`. If the script ever answers `auth` (passcode changed), the app forgets the stored passcode and shows the prompt again over whatever is on screen (form contents are kept); queued uploads wait and go once the new passcode is entered. Phones unlocked by the first build's client-side check (`ja_unlocked`, code `1234` in public `config.js`) are asked once for the new passcode.
 
+**Content-Security-Policy** (meta tag in `index.html`, 30 Sep round 4): `default-src 'none'`; scripts/styles only from the app itself; images self/data/blob; network calls only to self, `script.google.com` and `script.googleusercontent.com` (the Apps Script and its redirect); frames only `https://www.openstreetmap.org`; `base-uri`/`form-action` none. So even if a lead's text contained code, nothing else could run or be loaded, and data can't be sent anywhere else. **If the Apps Script URL ever moves off `script.google.com`, or another outside service is added, update this policy or the browser will block it.** (The test server rewrites `connect-src` to allow its fake script.)
+
 `doGet` only answers `?v=1` (version check) and never returns lead data. The duplicate-number lookup is a passcode-protected `doPost` (`kind: "lookup"`) returning only `lead_id`, `created_at`, `contact_name`, `venue`, `last_contacted`, `status`, `source` — never notes, phone, rep or photo folder.
 
 Photos in Drive are private to the script owner by default; don't share the "Just Audio - Lead Photos" folder publicly. If per-person logins are ever needed (rather than one shared passcode), the upgrade is hosting on Cloudflare Pages + Cloudflare Access (free, email-verified login).
@@ -118,7 +120,14 @@ Heading: "New entry" ("Edit lead" when editing). Fields top to bottom:
    - **Every failure says why:** blocked (code 1 — with iPhone or Android settings steps), location off (code 2), or nothing within 60s (a rough fix is kept if one arrived).
    - **"…or paste a Google Maps link"** is for walk-ins, where the rep isn't at the site. Coordinates are read from links containing `@lat,lng` or `q=lat,lng`; short `maps.app.goo.gl` links are saved as-is.
    - Saved as `location` ("lat, lng", 6 decimals), `location_accuracy_m`, and `map_link` (the pasted link, or `https://www.google.com/maps?q=lat,lng`).
-   - Picking a known site pre-fills its location.
+   - Picking a known site pre-fills its location, but the map preview for it loads **only when "Show map" is tapped**. That way saved customers' coordinates aren't sent to OpenStreetMap just because a number was typed.
+   - **The map preview is locked down** (owner asked for "the highest level of safety", 30 Sep round 4). The iframe has:
+     - `sandbox="allow-scripts"`: no same-origin, popups, top navigation or forms, so it can't touch the app, localStorage or the passcode;
+     - `credentialless`: no cookies (Chrome; ignored elsewhere);
+     - `referrerpolicy="no-referrer"`: OSM isn't told the app's address;
+     - `allow="geolocation 'none'; camera 'none'; microphone 'none'"`.
+
+     OSM does receive the map area and marker coordinates and the phone's IP address (unavoidable to draw the map). It receives no names, numbers or other lead data. The owner chose to keep the preview on this basis; removing it is a one-line change if privacy needs tighten.
 
 7. **Enquiry** — chips from `CONFIG.ENQUIRIES`, **multi-select**, default Sales: Sales / Service / Acoustics / Automation / Rental (3-per-row grid). Selected chips are navy with white text. At least one is required (inline error). Saved as e.g. `"sales, acoustics"`, in config order.
 
@@ -305,6 +314,18 @@ The owner's requests, all built and committed. **Live:** Apps Script v6 deployed
 
 - **Fixed: "Pin my current location" not working on the owner's phone.** Cause: a 15-second limit that started at the tap (so it included time spent on the permission question), after which the search was cancelled **silently** — no message, and the button just reset. A phone GPS indoors often needs longer than that for its first fix. Now there's a quick rough fix plus GPS refinement, a 60s limit, tap-to-stop, and a plain-language message for every failure (see TAB 2 → Location).
 - **Tests:** new `~/Desktop/jasalesapp-tests/loc-test.js` (9 checks with a scripted fake GPS: rough → precise, denied, location off, no answer, tap to stop, late fixes ignored). It fails 8 of 9 on the previous version, and passes on this one. `e2e.js` still passes all 59.
+- App-only change (Apps Script unchanged at v6).
+
+**SESSION LOG — 30 SEP 2026 (ROUND 4)**
+
+- The owner asked whether locations are public. Answer: no. They are stored on the phone, in the private Sheet, and returned only to passcode holders; the OSM map preview sees coordinates and IP. The owner chose to keep the preview "as long as you can ensure the highest level of safety", so:
+  - the map iframe is sandboxed, credentialless and no-referrer, with no device permissions;
+  - saved sites' maps load only on "Show map";
+  - a Content-Security-Policy now covers the whole app (see PASSCODE LOCK).
+- **Tests:**
+  - `e2e.js` has 62 checks and fails on any CSP violation (new checks: no map for a saved site until asked, Show map works, sandbox present).
+  - `loc-test.js` passes 9 of 9.
+  - `map-shot.js` confirms the sandboxed OSM map still draws (screenshot showed Anjuna with the marker).
 - App-only change (Apps Script unchanged at v6).
 
 **KNOWN ISSUES (open, not yet fixed)**

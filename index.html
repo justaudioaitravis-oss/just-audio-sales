@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Just Audio — Field Sales</title>
 <meta name="theme-color" content="#0C4670">
+<!-- Security: the page may only load its own files, talk to the Apps
+     Script, and show the OpenStreetMap preview — nothing else can run or be
+     loaded, even if a lead's text contained code. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://script.google.com https://script.googleusercontent.com; frame-src https://www.openstreetmap.org; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -105,7 +109,11 @@
         <span class="field-label">Location</span>
         <button type="button" id="locate-btn" class="outline-btn">Pin my current location</button>
         <div id="location-line" class="dupe-line hidden"></div>
-        <iframe id="location-map" class="location-map hidden" title="Map" referrerpolicy="no-referrer"></iframe>
+        <!-- The map preview runs locked down: it can draw the map, but can't
+             read or change this app, open windows, navigate away, use the
+             camera/location, or receive cookies; it isn't told this app's
+             address either. -->
+        <iframe id="location-map" class="location-map hidden" title="Map" referrerpolicy="no-referrer" sandbox="allow-scripts" allow="geolocation 'none'; camera 'none'; microphone 'none'" credentialless></iframe>
         <input id="map-link-input" class="underline-input" type="url" placeholder="…or paste a Google Maps link" autocomplete="off">
       </div>
 
