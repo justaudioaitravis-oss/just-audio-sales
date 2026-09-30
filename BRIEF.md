@@ -2,15 +2,43 @@
 
 Build a lightweight Progressive Web App for field sales lead capture. I am not a developer — explain what you're doing in plain language and don't assume I can debug.
 
-> **STATUS (updated 30 Sep 2026, round 2): Built, hardened and deployed. Round 2 (brand look, review/edit, music, location) is live — see SESSION LOG — 30 SEP (ROUND 2).** This file describes the app as it actually is, not just as originally requested — read this before making further changes so nothing gets rebuilt or redeployed unnecessarily. **To pick up where we left off, read SESSION LOG, KNOWN ISSUES and NEXT — EFFICIENCY PLAN at the bottom first.**
+> **STATUS (30 Sep 2026, end of session): v1.0 — feature-complete, deployed and in use. Tagged `v1.0` in git.** This file describes the app as it actually is, not just as originally requested — read this before making further changes so nothing gets rebuilt or redeployed unnecessarily. **Start with START HERE just below, then SESSION LOG, KNOWN ISSUES and NEXT at the bottom.**
 >
 > - **Live app:** `https://justaudioaitravis-oss.github.io/just-audio-sales/`
 > - **GitHub repo:** `https://github.com/justaudioaitravis-oss/just-audio-sales` (public repo — GitHub Pages on the free tier requires this, so nothing secret may ever go in it; see PASSCODE LOCK below)
 > - **Google Sheet:** tab named `Leads`, columns match the APPS SCRIPT section below
 > - **Apps Script:** deployed as a Web App, URL pasted into `config.js` → `APPS_SCRIPT_URL`. To ship a script change, edit `apps-script.gs`, paste into the Apps Script editor, then Deploy → Manage deployments → edit → **New version** → Deploy (the live URL does not change, so `config.js` never needs re-editing for a script-only change)
 > - Installed to home screen on the owner's phone, behind a passcode screen checked by the Apps Script (see PASSCODE LOCK)
-> - **Live versions (30 Sep 2026, round 2):** app = commit `87e3826` (website link, round 6) on GitHub Pages; Apps Script = API version **6** (deployed and confirmed via `APPS_SCRIPT_URL?v=1` → `"v":6`; `PASSCODE` script property set, 8+ chars); Drive photo folder confirmed private. The owner deleted all Sheet rows on 28 Sep 2026 to start fresh.
+> - **Live versions (30 Sep 2026, end of session — verified: every live app file matches the repo, and `?v=1` answers `"v":6`):** app = commit `87e3826` (website link, round 6) on GitHub Pages; Apps Script = API version **6** (deployed and confirmed via `APPS_SCRIPT_URL?v=1` → `"v":6`; `PASSCODE` script property set, 8+ chars); Drive photo folder confirmed private. The owner deleted all Sheet rows on 28 Sep 2026 to start fresh.
 > - **Shipping any app change:** deploy Apps Script first (if changed), then upload files. No version bump needed — phones pick up changed files automatically (see OFFLINE)
+
+**START HERE (next session)**
+
+**Where things stand.** The app is finished for now and the owner is happy with it ("looks great"). Everything below is live on the owner's phone:
+- Brand look, Follow-ups with Send / Call / Edit / Quoted / Won / Lost, and reminders at 2 days → 1 week → 2 weeks → monthly (no undo). A separate quote-chase schedule.
+- New entry: Site visit / Walk-in, sites per owner, venue type and size, GPS location with a locked-down map, enquiry and music chips, 6 photos per room with Remove room, and Review before saving.
+- Offline queue, passcode (checked by the Apps Script), "Start afresh on this phone", and the website link in every message.
+
+**The one open job: the brochure** (see SESSION LOG — ROUND 6 for the full plan). The owner will say in the next session:
+- **Hosting:** (a) a page on justaudioindia.com, which their web person uploads — recommended; or (b) a separate GitHub Pages repo, which Claude publishes. Never inside this app's repo.
+- **Material:** 6–10 photos of their own installs, brand logos, and whether it's "20+" or "25+" brands (the profile says both).
+- **Content:** already drafted from `~/Desktop/Just Audio/Just_Audio_Company_Profile_Updated.pdf`.
+- **When live:** set `BROCHURE_URL` in `config.js` and push. The brochure line then appears in first messages automatically; no Apps Script change is needed.
+
+**Before changing anything:**
+1. `git pull`, then check the live state: `curl -sL "<APPS_SCRIPT_URL>?v=1"` should say `"v":6`.
+2. The test tools live **outside** the repo at `~/Desktop/jasalesapp-tests`. Run `npm i puppeteer-core@23` once, then:
+   - `node e2e.js` — 71 checks, real Apps Script on a fake Sheet;
+   - `node loc-test.js` — 9 location checks, takes about 1 minute;
+   - `node shots.js` / `node reset-shot.js` / `node map-shot.js` — phone-size screenshots.
+
+   Tests use the locally installed Chrome. `e2e.js` rewrites the app's security policy (CSP) to allow its fake script.
+3. **Shipping:** if `apps-script.gs` changed, bump `API_VERSION` and the app's `MIN_SERVER_VERSION`. The owner deploys the script (Deploy → Manage deployments → edit → New version). Confirm with `?v=1`, then `git push`; phones update on their second open. The owner is not a developer: give plain-language steps and wait for "done".
+4. **After every round,** update this file (the relevant sections, Live versions, and a dated SESSION LOG entry) and commit it with the code.
+
+**Other ideas, not requested yet** (details under NEXT): send several uploads per call to cut waiting (P1a/P1d); faster photo processing (P3); phones pulling changes from the Sheet (P2 — needs an owner decision on privacy); a link to the brochure section matching each lead's enquiry.
+
+---
 
 **Stack constraints (strict):** Plain HTML, CSS and vanilla JavaScript. No React, no Vue, no Tailwind, no npm packages, no build step, no bundler. Total payload under 50KB excluding photos. It must open in under one second on a mid-range Android phone on weak wifi.
 
@@ -360,6 +388,10 @@ The owner's requests, all built and committed. **Live:** Apps Script v6 deployed
   - **Later optimisation:** link each lead's first message to the anchor of its first enquiry (e.g. `…/brochure#acoustics`).
   - **Once live:** paste the URL into `BROCHURE_URL` and push. The line appears in messages automatically; no other change is needed.
 
+**SESSION LOG — 30 SEP 2026 (END OF SESSION)**
+
+- The owner called this "likely to be one of the final app edits" and asked for a clean hand-off. Added START HERE at the top, confirmed the live app files match the repo and the Apps Script answers v6, and tagged the release **`v1.0`**.
+
 **KNOWN ISSUES (open, not yet fixed)**
 
 1. ~~Stuck "1 waiting" after deleting Sheet rows by hand~~ — fixed 30 Sep (the script answers `missing: true`).
@@ -374,7 +406,7 @@ The owner's requests, all built and committed. **Live:** Apps Script v6 deployed
 
 ---
 
-**NEXT — EFFICIENCY PLAN (planned 28 Sep 2026, not started)**
+**NEXT — EFFICIENCY PLAN (planned 28 Sep 2026; P1b, P1c and the P4 guard done 30 Sep — the rest not started)**
 
 Owner's direction: **efficiency over everything.** Ordered by measured impact. Nothing here has been built yet.
 
