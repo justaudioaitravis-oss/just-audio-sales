@@ -102,6 +102,24 @@ Quoted. If one goes out late, the next one still waits its full gap.
 
 ---
 
+### Starting afresh
+
+**This phone:** at the very bottom of Follow-ups, tap the small **Start
+afresh on this phone…** link. It explains what will happen; type **CLEAR**
+and tap **Clear this phone**. Every lead leaves this phone's Follow-ups.
+Your passcode and name stay, and the Google Sheet, photos and other phones
+are not touched. It won't let you clear while anything is still waiting to
+upload (the "waiting" badge) — get signal, let the badge clear, then try
+again.
+
+**The Google Sheet:** open it, select row 2 down to the last row,
+right-click → **Delete rows**. Keep row 1 (the column headings). Photos are
+in Google Drive → "Just Audio - Lead Photos"; delete venue folders there if
+you want those gone too. Clearing the Sheet doesn't clear any phone — do
+both if you want a completely fresh start.
+
+---
+
 ## 4. New entry
 
 - **Type of contact** — Site visit (you're at the venue) or Walk-in (they

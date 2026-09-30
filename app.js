@@ -427,6 +427,7 @@
     followupsDoneEl.textContent = "";
     followupsDoneEl.appendChild(doneRows);
     doneSectionEl.classList.toggle("hidden", done.length === 0);
+    resetAreaEl.classList.toggle("hidden", leads.length === 0);
   }
 
   // Tapping a row opens a small panel under it: Send (only once due),
@@ -597,6 +598,75 @@
     queueFollowupUpdate(lead, ["status", "closed_on", "next_action_date"]);
     renderFollowups();
   }
+
+  // ---- Start afresh on this phone ----
+  // Removes every lead from this phone (the Follow-ups list and the site
+  // chips). The Google Sheet, other phones, the passcode and the rep's
+  // name are untouched. Made hard to do by accident: a small link at the
+  // very bottom opens an explanation, CLEAR must be typed, and it refuses
+  // while anything is still waiting to upload — checked again at the
+  // moment of confirming — so an unsent visit can never be lost.
+
+  const resetAreaEl = document.getElementById("reset-area");
+  const resetLink = document.getElementById("reset-link");
+  const resetPanel = document.getElementById("reset-panel");
+  const resetText = document.getElementById("reset-text");
+  const resetInput = document.getElementById("reset-input");
+  const resetCancelBtn = document.getElementById("reset-cancel-btn");
+  const resetConfirmBtn = document.getElementById("reset-confirm-btn");
+
+  // How many items (rows, photos, follow-up changes) are still to upload.
+  function queuedItemCount() {
+    return Promise.all([idbStore.keys().catch(() => []), memStore.keys()]).then(([a, b]) => a.length + b.length);
+  }
+
+  function closeResetPanel() {
+    resetPanel.classList.add("hidden");
+    resetLink.classList.remove("hidden");
+    resetInput.value = "";
+  }
+
+  function showResetBlocked() {
+    resetText.textContent = "Some visits are still waiting to upload (see the badge at the top). They need signal to send. Once the badge has gone, try again — clearing now would lose them.";
+    resetInput.classList.add("hidden");
+    resetConfirmBtn.classList.add("hidden");
+  }
+
+  resetLink.addEventListener("click", () => {
+    resetLink.classList.add("hidden");
+    resetPanel.classList.remove("hidden");
+    resetText.textContent = "Checking…";
+    resetInput.classList.add("hidden");
+    resetConfirmBtn.classList.add("hidden");
+    queuedItemCount().then((n) => {
+      if (n > 0) { showResetBlocked(); return; }
+      const count = getLeads().length;
+      resetText.textContent = `This removes all ${count} lead${count === 1 ? "" : "s"} from this phone's Follow-ups. ` +
+        "It can't be undone. The Google Sheet, photos and other phones are not changed, and your passcode and name stay.";
+      resetInput.classList.remove("hidden");
+      resetConfirmBtn.classList.remove("hidden");
+      resetConfirmBtn.disabled = true;
+    });
+  });
+
+  resetInput.addEventListener("input", () => {
+    resetConfirmBtn.disabled = resetInput.value.trim().toUpperCase() !== "CLEAR";
+  });
+
+  resetCancelBtn.addEventListener("click", closeResetPanel);
+
+  resetConfirmBtn.addEventListener("click", () => {
+    if (resetInput.value.trim().toUpperCase() !== "CLEAR") return;
+    resetConfirmBtn.disabled = true;
+    queuedItemCount().then((n) => {
+      if (n > 0) { showResetBlocked(); return; }
+      saveLeads([]);
+      resetNewForm();
+      closeResetPanel();
+      renderFollowups();
+      followupsEmptyEl.textContent = "Cleared. No leads on this phone.";
+    });
+  });
 
   // ---------------------------------------------------------------------
   // 7. New Entry tab

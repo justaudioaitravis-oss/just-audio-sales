@@ -49,6 +49,20 @@
       <div id="done-heading">Done today</div>
       <ul id="followups-done"></ul>
     </div>
+
+    <!-- Start afresh: deliberately small, at the very bottom, and it needs
+         CLEAR typed before it will do anything -->
+    <div id="reset-area" class="reset-area hidden">
+      <button type="button" id="reset-link" class="text-btn reset-link">Start afresh on this phone…</button>
+      <div id="reset-panel" class="reset-panel hidden">
+        <p id="reset-text"></p>
+        <input id="reset-input" class="underline-input hidden" type="text" placeholder="Type CLEAR to confirm" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <div class="reset-actions">
+          <button type="button" id="reset-cancel-btn" class="outline-btn">Cancel</button>
+          <button type="button" id="reset-confirm-btn" class="danger-btn hidden" disabled>Clear this phone</button>
+        </div>
+      </div>
+    </div>
   </section>
 
   <!-- ========== TAB 2: NEW ENTRY ========== -->

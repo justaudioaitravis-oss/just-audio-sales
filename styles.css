@@ -231,6 +231,42 @@ section.tab.active { display: block; }
   padding: 16px 20px 4px;
 }
 
+/* ---------- Start afresh (bottom of Follow-ups) ---------- */
+
+.reset-area {
+  margin-top: 64px;
+  padding: 0 20px 24px;
+  text-align: center;
+}
+.reset-link { color: var(--muted); font-size: 12px; text-decoration: underline; }
+
+.reset-panel {
+  text-align: left;
+  border-top: 1px solid var(--hairline);
+  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.reset-panel p { margin: 0; font-size: 14px; line-height: 1.4; }
+
+.reset-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.danger-btn {
+  min-height: 44px;
+  border: none;
+  border-radius: 999px;
+  background: var(--error);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+.danger-btn:disabled { background: var(--hairline); color: var(--muted); }
+
 .empty-state {
   text-align: center;
   color: var(--muted);

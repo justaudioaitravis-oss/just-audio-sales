@@ -78,7 +78,15 @@ Rows are separated by 1px hairlines, not cards.
 - **Won / Lost** → `status` = `won`/`lost`, `closed_on` = today, `next_action_date` = "". Reminders stop; the row shows under Done today as "Closed — won/lost" until midnight, then disappears.
 - Quoted, Won and Lost can't be undone, so each needs **two taps**: the first turns the button into an accent-filled "Confirm" for 4 seconds.
 
-Empty state: centred, muted — "No leads yet." (no leads on the phone at all) or "No open leads."
+Empty state: centred, muted — "No leads yet." (no leads on the phone at all), "No open leads.", or "Cleared. No leads on this phone." right after a reset.
+
+**Start afresh on this phone** (30 Sep round 5 — owner: "make it difficult to click accidentally"):
+- A small muted underlined link, "Start afresh on this phone…", sits 64px below everything else in Follow-ups. It is hidden when the phone has no leads.
+- Tapping it opens an inline panel, never a dialog. The panel explains that all N leads leave this phone, that it can't be undone, and that the Sheet, photos, other phones, passcode and name are untouched.
+- The red **Clear this phone** button stays disabled until **CLEAR** is typed (any case; `autocapitalize="characters"`). **Cancel** closes the panel.
+- It **refuses while anything is in the upload queue**, and checks again at the moment of confirming, so an unsent visit can't be lost. The panel then says to wait for the badge to clear.
+- Clearing does `saveLeads([])` and resets the New entry form. `ja_key`, `ja_rep` and `ja_server_v` are kept.
+- Clearing the Sheet is manual: delete rows 2+ and keep the header (see README → Starting afresh). Leads left on phones after that are harmless (updates answer `missing: true`; a revisit or edit re-creates the row).
 
 Leads are never deleted from the phone (closed ones are kept for the site chips in New entry), so the list keeps its speed work: row labels computed without building the WhatsApp message, one shared date formatter, rows built in a DocumentFragment, one delegated click listener (rows carry `data-id`; opening a panel touches only that row, with no re-render), and `content-visibility: auto`. Measured at 6× CPU throttle (budget Android, 28 Sep): 1,000 leads ≈ 45ms to show the list, 3,000 ≈ 100ms.
 
@@ -328,10 +336,16 @@ The owner's requests, all built and committed. **Live:** Apps Script v6 deployed
   - `map-shot.js` confirms the sandboxed OSM map still draws (screenshot showed Anjuna with the marker).
 - App-only change (Apps Script unchanged at v6).
 
+**SESSION LOG — 30 SEP 2026 (ROUND 5)**
+
+- Owner asked how to clear Follow-ups / start afresh. Added **Start afresh on this phone** (see TAB 1): a hidden-away link, an explanation, type CLEAR, refuses while uploads are waiting. README → "Starting afresh" covers the phone and the Sheet.
+- **Tests:** `e2e.js` now has 71 checks. New ones: refuses with a waiting upload; button off until CLEAR is typed and for partial words; Cancel; passcode, name and Sheet untouched. `reset-shot.js` screenshots the link and panel.
+- App-only change (Apps Script unchanged at v6).
+
 **KNOWN ISSUES (open, not yet fixed)**
 
 1. ~~Stuck "1 waiting" after deleting Sheet rows by hand~~ — fixed 30 Sep (the script answers `missing: true`).
-2. **No way to remove leads from a phone** except closing them (Won/Lost hides them from Follow-ups), so old test leads can be closed as Lost. Proper cleanup still needs P2.
+2. **Removing leads from a phone:** one at a time via Won/Lost, or all at once with "Start afresh on this phone" (round 5). There is still no automatic removal of rows deleted in the Sheet — that needs P2.
 3. **Sites known only to the Sheet can arrive after Send.** Each Apps Script call takes 4–10s. Sites on this phone now appear instantly and the lookup starts at the 10th digit, but a site logged only on *another* phone can still be missed if the rep is quick → a second row. See P2.
 4. **Phones don't learn about Sheet changes** (status edited by hand, rows deleted, other reps' leads) except through the site lookup. See P2 — the new `updated_at` column is ready for it.
 5. **localStorage leads have a ceiling** (~380 bytes per lead → ~6,000+ leads on Safari). `saveLeads` is now guarded, so a full storage can't stop a visit being queued; moving leads to IndexedDB is still P4.
