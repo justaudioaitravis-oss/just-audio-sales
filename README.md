@@ -116,11 +116,16 @@ Quoted. If one goes out late, the next one still waits its full gap.
 - **Venue type** — a dropdown; edit the list under `VENUE_TYPES` in `config.js`.
 - **Venue size** — length, breadth and height in feet. Area fills itself
   in as length × breadth; type over it if the room isn't a rectangle.
-- **Location** — at the venue, tap **Pin my current location**. The phone's
-  GPS finds the spot (free, works without signal; the first time, the
-  phone asks permission to share location — allow it). It shows the
-  coordinates, how precise they are (e.g. ±8 m, best outdoors), a small map
-  when there's signal, and an "Open in Maps" link. For a walk-in, open the
+- **Location** — at the venue, tap **Pin my current location** (free, works
+  without signal; the first time, the phone asks permission to share
+  location — allow it). A rough position usually appears within a second or
+  two, then it sharpens as the GPS locks on ("improving…") — it stops by
+  itself once it's within 20 m, or after a minute. It shows the
+  coordinates, how precise they are (e.g. ±8 m, best near a window or
+  outdoors), a small map when there's signal, and an "Open in Maps" link.
+  Tap the button again to stop early. If it can't get a location, it says
+  why and how to fix it (e.g. location switched off or blocked for the
+  app). For a walk-in, open the
   venue in Google Maps, Share → Copy link, and paste it into the box
   instead. The Sheet gets the coordinates and a Google Maps link.
 - **Enquiry** and **Type of music** — tap as many as apply (at least one

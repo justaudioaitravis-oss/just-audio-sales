@@ -709,16 +709,22 @@
   }
 
   // ---- Location ----
-  // "Pin my current location" asks the phone's GPS (free, works without
-  // signal, needs location permission once). It keeps listening for up to
-  // 15 seconds and keeps the most precise fix, stopping early once it is
-  // within 20 m. A walk-in client's site can't be pinned from the shop, so
-  // a Google Maps link can be pasted instead (coordinates are read from it
-  // when the link contains them).
+  // "Pin my current location" asks the phone for its position (free, no
+  // key; GPS works without signal; needs location permission once). Two
+  // requests run together: a quick, rougher fix (Wi-Fi / mobile towers, or
+  // a fix the phone got in the last 2 minutes) so something shows within a
+  // second or two, and the GPS, which keeps refining for up to a minute and
+  // stops early once it is within 20 m. The most precise fix is kept.
+  // Tapping the button again while it searches stops it. If nothing at all
+  // arrives, it says why. A walk-in client's site can't be pinned from the
+  // shop, so a Google Maps link can be pasted instead (coordinates are read
+  // from it when the link contains them).
   let pinned = null; // { lat, lng, acc } or null
   let watchId = null;
+  let locateTimer = null;
+  let locating = false;
   const GOOD_ENOUGH_M = 20;
-  const LOCATE_TIMEOUT_MS = 15000;
+  const LOCATE_MAX_MS = 60000;
 
   function locationText(p) {
     return `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`;
@@ -727,8 +733,14 @@
   function stopLocating() {
     if (watchId !== null) navigator.geolocation.clearWatch(watchId);
     watchId = null;
-    locateBtn.disabled = false;
+    clearTimeout(locateTimer);
+    locating = false;
     locateBtn.textContent = pinned ? "Re-pin my current location" : "Pin my current location";
+  }
+
+  function locationMessage(text) {
+    locationLine.textContent = text;
+    locationLine.classList.remove("hidden");
   }
 
   function showPinned() {
@@ -744,44 +756,80 @@
     link.target = "_blank";
     link.rel = "noopener";
     link.textContent = "Open in Maps";
-    locationLine.append(`${locationText(pinned)}${pinned.acc ? ` · ±${Math.round(pinned.acc)} m` : ""} · `, link);
+    const refining = locating ? " · improving…" : "";
+    locationLine.append(`${locationText(pinned)}${pinned.acc ? ` · ±${Math.round(pinned.acc)} m` : ""}${refining} · `, link);
     locationLine.classList.remove("hidden");
     // A small OpenStreetMap preview (free, no key) — only with signal.
     if (navigator.onLine !== false) {
       const d = 0.002;
-      locationMap.src = "https://www.openstreetmap.org/export/embed.html?bbox=" +
+      const src = "https://www.openstreetmap.org/export/embed.html?bbox=" +
         `${pinned.lng - d},${pinned.lat - d},${pinned.lng + d},${pinned.lat + d}&layer=mapnik&marker=${pinned.lat},${pinned.lng}`;
+      if (locationMap.getAttribute("src") !== src) locationMap.src = src;
       locationMap.classList.remove("hidden");
     }
   }
 
+  // Plain-language help for each way asking for the location can fail.
+  function locationErrorText(err) {
+    const iPhone = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    if (err.code === 1) {
+      return iPhone
+        ? "Location is blocked. On the iPhone: Settings → Privacy & Security → Location Services → turn it on, and set Safari Websites to \"While Using\". Then try again, or paste a Maps link."
+        : "Location is blocked for this app. In Chrome: ⋮ → Settings → Site settings → Location → allow this site, and make sure the phone's Location is on. Then try again, or paste a Maps link.";
+    }
+    if (err.code === 2) {
+      return iPhone
+        ? "The phone couldn't find its location. Check Settings → Privacy & Security → Location Services is on, then try again near a window or outdoors."
+        : "The phone couldn't find its location. Check Location is switched on (pull down from the top of the screen), then try again near a window or outdoors.";
+    }
+    return "Couldn't get a location in time — try again near a window or outdoors, or paste a Maps link.";
+  }
+
   locateBtn.addEventListener("click", () => {
-    if (!navigator.geolocation) {
-      locationLine.textContent = "This phone can't share its location — paste a Maps link instead.";
-      locationLine.classList.remove("hidden");
+    if (locating) { stopLocating(); showPinned(); return; }
+    if (!navigator.geolocation || !window.isSecureContext) {
+      locationMessage("This phone can't share its location here — paste a Maps link instead.");
       return;
     }
-    locateBtn.disabled = true;
-    locateBtn.textContent = "Finding location…";
+    locating = true;
+    locateBtn.textContent = "Finding location… tap to stop";
+    locationMessage("Finding location — the first fix can take up to a minute indoors.");
+    const startedWith = pinned;
     let best = null;
-    const timer = setTimeout(stopLocating, LOCATE_TIMEOUT_MS);
-    watchId = navigator.geolocation.watchPosition((pos) => {
+    let lastError = null;
+
+    function take(pos) {
+      if (!locating) return;
       const fix = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy };
-      if (!best || fix.acc < best.acc) {
-        best = fix;
-        pinned = fix;
+      if (best && fix.acc >= best.acc) return;
+      best = fix;
+      pinned = fix;
+      if (fix.acc <= GOOD_ENOUGH_M) stopLocating();
+      showPinned();
+    }
+    function fail(err) {
+      lastError = err;
+      if (!locating || best) return;
+      // A refusal or "location switched off" won't fix itself — stop now.
+      // A timeout on the quick fix just leaves the GPS to keep trying.
+      if (err.code === 1 || err.code === 2) {
+        stopLocating();
+        pinned = startedWith;
         showPinned();
+        locationMessage(locationErrorText(err));
       }
-      if (fix.acc <= GOOD_ENOUGH_M) { clearTimeout(timer); stopLocating(); }
-    }, (err) => {
-      clearTimeout(timer);
+    }
+
+    navigator.geolocation.getCurrentPosition(take, fail, { enableHighAccuracy: false, maximumAge: 120000, timeout: LOCATE_MAX_MS });
+    watchId = navigator.geolocation.watchPosition(take, fail, { enableHighAccuracy: true, maximumAge: 0 });
+    locateTimer = setTimeout(() => {
+      if (!locating) return;
       stopLocating();
-      if (best) return;
-      locationLine.textContent = err.code === 1
-        ? "Location permission is off — allow it for this app in the phone's settings, or paste a Maps link."
-        : "Couldn't get a location — try again outdoors, or paste a Maps link.";
-      locationLine.classList.remove("hidden");
-    }, { enableHighAccuracy: true, maximumAge: 0, timeout: LOCATE_TIMEOUT_MS });
+      if (best) { showPinned(); return; }
+      pinned = startedWith;
+      showPinned();
+      locationMessage(locationErrorText(lastError || { code: 3 }));
+    }, LOCATE_MAX_MS);
   });
 
   // Reads coordinates out of a pasted Maps link, e.g. ".../@15.59,73.74,17z"
@@ -804,7 +852,7 @@
   }
 
   function setLocation(record) {
-    if (watchId !== null) stopLocating();
+    if (locating) stopLocating();
     const m = record && String(record.location || "").match(/(-?[\d.]+),\s*(-?[\d.]+)/);
     pinned = m ? { lat: Number(m[1]), lng: Number(m[2]), acc: Number(record.location_accuracy_m) || 0 } : null;
     const link = record ? String(record.map_link || "") : "";

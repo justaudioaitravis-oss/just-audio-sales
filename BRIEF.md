@@ -110,7 +110,12 @@ Heading: "New entry" ("Edit lead" when editing). Fields top to bottom:
 5. **Venue size (feet)** — Length, Breadth, Height, Area sq ft: four small numeric inputs, each labelled underneath. Area fills itself in as round(L × B) unless typed by hand. All optional; saved as digits and decimal point only.
 
 6. **Location** (free, no API key or account):
-   - **"Pin my current location"** uses the phone's GPS (`navigator.geolocation.watchPosition`, high accuracy). It keeps the most precise fix for up to 15s and stops early once within 20m. It shows `15.587300, 73.744200 · ±8 m · Open in Maps` plus a small **OpenStreetMap embed** (iframe, loaded only when online). GPS works without signal; the first use asks location permission, and a refusal shows an inline hint.
+   - **"Pin my current location"** runs two requests together (fixed 30 Sep, round 3):
+     - a quick rough fix (`getCurrentPosition`, `enableHighAccuracy: false`, `maximumAge` 2 min), so something shows in a second or two;
+     - the GPS (`watchPosition`, high accuracy, no timeout option), which keeps refining.
+   - The most precise fix is kept, with "· improving…" shown while it searches. It stops once within 20m, or after **60s**; tapping the button again ("Finding location… tap to stop") stops it early.
+   - The result reads `15.587300, 73.744200 · ±8 m · Open in Maps`, with a small **OpenStreetMap embed** (iframe, loaded only when online). GPS works without signal; the first use asks location permission.
+   - **Every failure says why:** blocked (code 1 — with iPhone or Android settings steps), location off (code 2), or nothing within 60s (a rough fix is kept if one arrived).
    - **"…or paste a Google Maps link"** is for walk-ins, where the rep isn't at the site. Coordinates are read from links containing `@lat,lng` or `q=lat,lng`; short `maps.app.goo.gl` links are saved as-is.
    - Saved as `location` ("lat, lng", 6 decimals), `location_accuracy_m`, and `map_link` (the pasted link, or `https://www.google.com/maps?q=lat,lng`).
    - Picking a known site pre-fills its location.
@@ -295,6 +300,12 @@ The owner's requests, all built and committed. **Live:** Apps Script v6 deployed
 - **Location:** free GPS pin with precision, an OpenStreetMap preview and a Google Maps link, or a pasted Maps link for walk-ins. Saved as `location`, `location_accuracy_m`, `map_link`.
 - **Apps Script v6:** 4 new columns, and the Sheet grows past 26 columns automatically.
 - **Tests:** `~/Desktop/jasalesapp-tests/e2e.js` now has 59 checks. It covers the review flow, edit, room removal, music, GPS (simulated), pasted-link parsing, and the 26-column Sheet limit; 3 of 3 runs passed. `shots.js` screenshots the Follow-ups panel, the form, the review screen and the lock screen.
+
+**SESSION LOG — 30 SEP 2026 (ROUND 3)**
+
+- **Fixed: "Pin my current location" not working on the owner's phone.** Cause: a 15-second limit that started at the tap (so it included time spent on the permission question), after which the search was cancelled **silently** — no message, and the button just reset. A phone GPS indoors often needs longer than that for its first fix. Now there's a quick rough fix plus GPS refinement, a 60s limit, tap-to-stop, and a plain-language message for every failure (see TAB 2 → Location).
+- **Tests:** new `~/Desktop/jasalesapp-tests/loc-test.js` (9 checks with a scripted fake GPS: rough → precise, denied, location off, no answer, tap to stop, late fixes ignored). It fails 8 of 9 on the previous version, and passes on this one. `e2e.js` still passes all 59.
+- App-only change (Apps Script unchanged at v6).
 
 **KNOWN ISSUES (open, not yet fixed)**
 
