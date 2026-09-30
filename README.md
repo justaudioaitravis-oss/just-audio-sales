@@ -7,16 +7,21 @@ This file explains the things you're most likely to need later.
 
 ---
 
-## 1. Changing the brochure link
+## 1. Changing the brochure and website links
 
 There is one brochure for all services. Open `config.js` in any text editor
 (even Notes or a basic code editor works). Near the top you'll see:
 
 ```js
-BROCHURE_URL: "BROCHURE_URL_PLACEHOLDER",
+BROCHURE_URL: "",
+WEBSITE_URL: "https://www.justaudioindia.com/",
 ```
 
-Replace the placeholder with the real web link, keeping the quote marks, e.g.:
+Every message ends with the website link. The first message also includes
+the brochure — but while `BROCHURE_URL` is empty (`""`), that line is simply
+left out, so messages never show a blank or placeholder link.
+
+To add the brochure, put its web link between the quote marks, e.g.:
 
 ```js
 BROCHURE_URL: "https://justaudio.example.com/brochure",
@@ -32,8 +37,8 @@ changed file (see the GitHub Pages steps you were walked through during setup).
 Still in `config.js`, further down, under `TEMPLATES`. Each one is the text
 that gets pre-filled into WhatsApp. A few rules:
 
-- Keep the curly-brace words like `{name}`, `{venue}`, `{brochure}`, `{rep}`,
-  `{company}` exactly as they are — the app swaps in the real values
+- Keep the curly-brace words like `{name}`, `{venue}`, `{brochure}`,
+  `{website}`, `{rep}`, `{company}`, `{services}` exactly as they are — the app swaps in the real values
   automatically. Don't rename or remove them unless you mean to.
 - Use `\n` for a line break (not a real Enter key press) — this is what keeps
   the WhatsApp message properly split into paragraphs.

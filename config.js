@@ -13,8 +13,12 @@ const CONFIG = {
   // Properties → PASSCODE) — see README, "Changing the passcode".
 
   // The brochure link sent inside WhatsApp messages wherever {brochure}
-  // appears. One brochure covers every service.
-  BROCHURE_URL: "BROCHURE_URL_PLACEHOLDER",
+  // appears. One brochure covers every service. While this is left empty
+  // (""), the "Our brochure" line is left out of messages automatically.
+  BROCHURE_URL: "",
+
+  // The website link sent at the end of every WhatsApp message ({website}).
+  WEBSITE_URL: "https://www.justaudioindia.com/",
 
   // Shown inside message templates wherever {company} appears.
   COMPANY_NAME: "Just Audio",
@@ -55,61 +59,65 @@ const CONFIG = {
   // in capitals, however they are typed here.
   ROOM_LABELS: ["FRONT WALL", "LEFT WALL", "RIGHT WALL", "BACK WALL", "CEILING", "OVERVIEW"],
 
-  // Message templates. Placeholders {name} {venue} {brochure} {rep} {company}
-  // {services} are swapped for real values right before the WhatsApp
+  // Message templates. Placeholders {name} {venue} {brochure} {website}
+  // {rep} {company} {services} are swapped for real values right before the WhatsApp
   // message is built. Use \n for a line break — it will show as a real line
-  // break on WhatsApp.
+  // break on WhatsApp. A line whose {brochure} or {website} link is empty is
+  // left out of the message.
   TEMPLATES: {
     // First message, sent the moment a New entry is saved. One per type of
     // contact (the chips at the top of New entry).
     first_site_visit:
       "Hi {name}, this is {rep} from {company}.\n\n" +
       "Thank you for your time at {venue} today. As discussed, we can help with {services}. We will put together a quote and send it over shortly.\n\n" +
-      "Our brochure: {brochure}",
+      "Our brochure: {brochure}\n" +
+      "Website: {website}",
 
     first_walkin:
       "Hi {name}, this is {rep} from {company}.\n\n" +
       "Thank you for coming in to see us. As discussed, we can help with {services} for {venue}. We will put together a quote, and can arrange a free site survey at a time that suits you.\n\n" +
-      "Our brochure: {brochure}",
+      "Our brochure: {brochure}\n" +
+      "Website: {website}",
 
     // Reminders, in order (see REMINDER_SCHEDULE_DAYS above).
     nudge_2day:
       "Hi {name}, this is {rep} from {company}, following up on our chat about {venue}.\n\n" +
-      "Just checking you received everything you needed — happy to answer any questions.",
-
+      "Just checking you received everything you needed — happy to answer any questions.\n\n" +
+      "Website: {website}",
     nudge_1week:
       "Hi {name}, this is {rep} from {company}, checking in again about {venue}.\n\n" +
-      "Wanted to see if you have had a chance to think this over, and if there is anything I can help with.",
-
+      "Wanted to see if you have had a chance to think this over, and if there is anything I can help with.\n\n" +
+      "Website: {website}",
     nudge_2week:
       "Hi {name}, this is {rep} from {company}, following up once more on {venue}.\n\n" +
-      "No pressure at all — just let me know if the timing works better later.",
-
+      "No pressure at all — just let me know if the timing works better later.\n\n" +
+      "Website: {website}",
     nudge_monthly:
       "Hi {name}, this is {rep} from {company}, touching base again about {venue}.\n\n" +
-      "We are still very happy to help whenever the time is right — just let me know.",
-
+      "We are still very happy to help whenever the time is right — just let me know.\n\n" +
+      "Website: {website}",
     // Quote chases, in order (see QUOTE_SCHEDULE_DAYS above). Used once
     // "Quoted" has been tapped for a lead, instead of the reminders above.
     quote_2day:
       "Hi {name}, this is {rep} from {company}.\n\n" +
-      "Just checking the quote for {venue} reached you. Happy to go through it or answer any questions.",
-
+      "Just checking the quote for {venue} reached you. Happy to go through it or answer any questions.\n\n" +
+      "Website: {website}",
     quote_1week:
       "Hi {name}, this is {rep} from {company}.\n\n" +
-      "Checking in on the quote we sent over for {venue}. Happy to adjust anything to fit your budget.",
-
+      "Checking in on the quote we sent over for {venue}. Happy to adjust anything to fit your budget.\n\n" +
+      "Website: {website}",
     quote_2week:
       "Hi {name}, this is {rep} from {company}, following up on the quote for {venue}.\n\n" +
-      "If the timing is not right yet, just let me know and I will check back later.",
-
+      "If the timing is not right yet, just let me know and I will check back later.\n\n" +
+      "Website: {website}",
     quote_monthly:
       "Hi {name}, this is {rep} from {company}.\n\n" +
-      "Our quote for {venue} still stands, and we are happy to revisit it whenever suits you.",
-
+      "Our quote for {venue} still stands, and we are happy to revisit it whenever suits you.\n\n" +
+      "Website: {website}",
     // Available for manual use — not sent automatically by the schedule.
     survey_offer:
       "Hi {name}, this is {rep} from {company}.\n\n" +
-      "If it helps, we can arrange a free, no-obligation site survey at {venue} so you can see exactly what we would suggest before deciding anything."
+      "If it helps, we can arrange a free, no-obligation site survey at {venue} so you can see exactly what we would suggest before deciding anything.\n\n" +
+      "Website: {website}"
   }
 };

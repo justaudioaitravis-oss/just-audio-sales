@@ -51,8 +51,16 @@
     return Math.round((b - a) / 86400000);
   }
 
+  // Swaps {placeholders} for real values. A line whose link placeholder
+  // ({brochure} or {website}) has no link set is dropped, so a message
+  // never says "Our brochure: " with nothing after it.
+  const LINK_KEYS = ["brochure", "website"];
   function fillTemplate(str, vars) {
-    return str.replace(/\{(\w+)\}/g, (_, key) => (vars[key] != null ? vars[key] : ""));
+    const kept = str.split("\n").filter((line) => !LINK_KEYS.some((k) => line.includes(`{${k}}`) && !vars[k]));
+    return kept.join("\n")
+      .replace(/\{(\w+)\}/g, (_, key) => (vars[key] != null ? vars[key] : ""))
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
   }
 
   // Made once and reused: toLocaleDateString builds a new formatter on
@@ -367,6 +375,7 @@
       name: lead.contact_name,
       venue: lead.venue,
       brochure: CONFIG.BROCHURE_URL || "",
+      website: CONFIG.WEBSITE_URL || "",
       rep: lead.rep,
       company: CONFIG.COMPANY_NAME,
       services: servicesPhrase(lead.enquiry)

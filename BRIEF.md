@@ -208,7 +208,7 @@ On first open (after the passcode screen), show a single full-screen prompt: "Yo
 
 **config.js**
 
-Every value I might change lives here and nowhere else. Comment each one in plain English. Current keys: `APPS_SCRIPT_URL`, `BROCHURE_URL` (one brochure for all services), `COMPANY_NAME`, `REMINDER_SCHEDULE_DAYS`, `MONTHLY_INTERVAL_DAYS`, `QUOTE_SCHEDULE_DAYS`, `ENQUIRIES` (key → phrase used in `{services}`), `VENUE_TYPES`, `ROOM_LABELS`, `MUSIC_TYPES`, `TEMPLATES`: `first_site_visit`, `first_walkin`, `nudge_2day`, `nudge_1week`, `nudge_2week`, `nudge_monthly`, `quote_2day`, `quote_1week`, `quote_2week`, `quote_monthly`, `survey_offer`. Placeholders: `{name} {venue} {brochure} {rep} {company} {services}`. There is no passcode here — it lives in the Apps Script's Script Properties (see PASSCODE LOCK), because this file is public.
+Every value I might change lives here and nowhere else. Comment each one in plain English. Current keys: `APPS_SCRIPT_URL`, `BROCHURE_URL` (one brochure for all services; **empty until the brochure exists**), `WEBSITE_URL` (`https://www.justaudioindia.com/`), `COMPANY_NAME`, `REMINDER_SCHEDULE_DAYS`, `MONTHLY_INTERVAL_DAYS`, `QUOTE_SCHEDULE_DAYS`, `ENQUIRIES` (key → phrase used in `{services}`), `VENUE_TYPES`, `ROOM_LABELS`, `MUSIC_TYPES`, `TEMPLATES`: `first_site_visit`, `first_walkin`, `nudge_2day`, `nudge_1week`, `nudge_2week`, `nudge_monthly`, `quote_2day`, `quote_1week`, `quote_2week`, `quote_monthly`, `survey_offer`. Placeholders: `{name} {venue} {brochure} {website} {rep} {company} {services}`. **Every template ends with `Website: {website}`**; the first messages end `Our brochure: {brochure}` then `Website: {website}`. `fillTemplate` drops any line whose `{brochure}`/`{website}` value is empty, so an unset brochure never shows as a blank or placeholder link. WhatsApp previews the first link in a message, so once the brochure is set, the first message shows the brochure's card. There is no passcode here — it lives in the Apps Script's Script Properties (see PASSCODE LOCK), because this file is public.
 
 All templates should read warm, plain Indian English, no exclamation marks, no emoji, under 60 words each. The first messages promise a quote and offer a free site survey (the site-visit one says the quote is on its way).
 
@@ -341,6 +341,24 @@ The owner's requests, all built and committed. **Live:** Apps Script v6 deployed
 - Owner asked how to clear Follow-ups / start afresh. Added **Start afresh on this phone** (see TAB 1): a hidden-away link, an explanation, type CLEAR, refuses while uploads are waiting. README → "Starting afresh" covers the phone and the Sheet.
 - **Tests:** `e2e.js` now has 71 checks. New ones: refuses with a waiting upload; button off until CLEAR is typed and for partial words; Cancel; passcode, name and Sheet untouched. `reset-shot.js` screenshots the link and panel.
 - App-only change (Apps Script unchanged at v6).
+
+**SESSION LOG — 30 SEP 2026 (ROUND 6)**
+
+- **Website link in every message** (owner's request): `WEBSITE_URL` plus a `Website: {website}` line on all 11 templates. `BROCHURE_URL` was changed from a placeholder string to `""`, and lines with empty links are dropped. (Before this, first messages literally said "BROCHURE_URL_PLACEHOLDER".) All templates stay under 60 words. `e2e.js` checks the website in the first message, a nudge and a quote chase, and that no brochure line appears while unset (71 checks pass). App-only change.
+- **Brochure — recommended plan (not built yet; awaiting the owner's go-ahead and the hosting choice):**
+  - **Format:** a single mobile-first **web page** on the company domain (e.g. `https://www.justaudioindia.com/brochure`), not a PDF. It opens instantly inside WhatsApp with no download, gets a preview card (Open Graph tags + image), can be updated without changing the link (old messages stay current), and has tap-to-call/WhatsApp buttons. Optionally add a "Download PDF" for printing.
+  - **Content** comes from `~/Desktop/Just Audio/Just_Audio_Company_Profile_Updated.pdf` (text extracted 30 Sep), ordered to mirror the app:
+    1. Hero — logo, "Two decades behind every great sound in Goa", WhatsApp/Call buttons.
+    2. The 5 services, matching the app's enquiry chips (Sales, Service, Acoustics, Automation, Rental), with an anchor each (`#sales` …).
+    3. Venue types, matching the app's dropdown, one real photo each.
+    4. Proof — since 2000, 25+ brands (logos), hundreds of installs, named clients (Tito's, SinQ, DTR, Soro, Britto's, Souza Lobo, Le Méridien, Radisson Blu, BITS, Ravindra Bhavan, Old Goa Church, Nuvem Church).
+    5. How it works — visit → free site survey → quote → install → service and training.
+    6. Contact — Sales 93595 69160, Service 74985 18819 / 0832-2411875, Rental 98231 76928, address, map.
+  - **Budget:** under ~1.5 MB total (6–10 WebP photos at ~120 KB each), plain HTML/CSS in the app's navy/white style, no frameworks.
+  - **Needs from the owner:** 6–10 photos of their own installs (not customers' private photos from the app's Drive folder unless the venue agrees), brand logos, and confirmation of facts. The profile says both "20+ brand partnerships" and "25+ brands".
+  - **Hosting:** the company website (whoever manages justaudioindia.com adds the page), or a separate GitHub Pages repo as a fallback. Never inside the app repo — the app's service worker and security policy cover that folder.
+  - **Later optimisation:** link each lead's first message to the anchor of its first enquiry (e.g. `…/brochure#acoustics`).
+  - **Once live:** paste the URL into `BROCHURE_URL` and push. The line appears in messages automatically; no other change is needed.
 
 **KNOWN ISSUES (open, not yet fixed)**
 
