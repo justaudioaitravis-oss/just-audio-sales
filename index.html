@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Just Audio — Field Sales</title>
-<meta name="theme-color" content="#FAF8F4">
+<meta name="theme-color" content="#0C4670">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -14,6 +14,7 @@
 
 <!-- Full-screen lock screen shown once per phone, before anything else -->
 <div id="passcode-prompt" class="fullscreen-prompt hidden">
+  <img class="prompt-logo" src="icons/logo.png" alt="Just Audio">
   <h1>Enter passcode</h1>
   <input id="passcode-input" class="fullscreen-prompt-input" type="password" placeholder="Passcode" autocomplete="off" autocapitalize="off" spellcheck="false">
   <div id="passcode-error" class="inline-error"></div>
@@ -22,12 +23,15 @@
 
 <!-- Full-screen prompt shown once, the very first time the app is opened -->
 <div id="rep-prompt" class="fullscreen-prompt hidden">
+  <img class="prompt-logo" src="icons/logo.png" alt="Just Audio">
   <h1>Your name?</h1>
   <input id="rep-name-input" class="fullscreen-prompt-input" type="text" placeholder="e.g. Rohan" autocomplete="off">
   <button id="rep-save-btn" class="fullscreen-prompt-btn">Save</button>
 </div>
 
 <main id="app" class="hidden">
+
+  <header class="brand-bar"><img src="icons/logo.png" alt="Just Audio"></header>
 
   <!-- ========== TAB 1: FOLLOW-UPS ========== -->
   <section id="tab-followups" class="tab active">
@@ -46,7 +50,8 @@
   <!-- ========== TAB 2: NEW ENTRY ========== -->
   <section id="tab-new" class="tab">
     <div class="screen-header">
-      <h1>New entry</h1>
+      <h1 id="new-heading">New entry</h1>
+      <button type="button" id="cancel-edit-btn" class="text-btn hidden">Cancel edit</button>
     </div>
 
     <form id="new-form">
@@ -54,10 +59,8 @@
       <div class="field-group">
         <span class="field-label">Type of contact</span>
         <div class="chip-row" id="source-chips">
-          <button type="button" class="chip" data-value="visit">Field visit</button>
-          <button type="button" class="chip" data-value="walkin">Walk-in</button>
-          <button type="button" class="chip" data-value="inbound">Inbound</button>
           <button type="button" class="chip" data-value="site_visit">Site visit</button>
+          <button type="button" class="chip" data-value="walkin">Walk-in</button>
         </div>
       </div>
 
@@ -99,9 +102,22 @@
       </div>
 
       <div class="field-group">
+        <span class="field-label">Location</span>
+        <button type="button" id="locate-btn" class="outline-btn">Pin my current location</button>
+        <div id="location-line" class="dupe-line hidden"></div>
+        <iframe id="location-map" class="location-map hidden" title="Map" referrerpolicy="no-referrer"></iframe>
+        <input id="map-link-input" class="underline-input" type="url" placeholder="…or paste a Google Maps link" autocomplete="off">
+      </div>
+
+      <div class="field-group">
         <span class="field-label">Enquiry — pick all that apply</span>
         <div class="chip-row wrap" id="enquiry-chips"><!-- one chip per CONFIG.ENQUIRIES, injected by app.js --></div>
         <div id="enquiry-error" class="inline-error"></div>
+      </div>
+
+      <div class="field-group">
+        <span class="field-label">Type of music — pick all that apply</span>
+        <div class="chip-row wrap" id="music-chips"><!-- one chip per CONFIG.MUSIC_TYPES, injected by app.js --></div>
       </div>
 
       <div class="field-group">
@@ -114,9 +130,18 @@
         <input id="note-input" class="underline-input" type="text" placeholder="Note — zones, music, deadline" autocomplete="off">
       </div>
 
-      <button type="submit" id="submit-btn">Send to +91 98765 43210</button>
+      <button type="submit" id="submit-btn">Review</button>
 
     </form>
+
+    <!-- Shown after "Review": everything that will be saved, to check first -->
+    <div id="review" class="hidden">
+      <dl id="review-list"></dl>
+      <div class="review-actions">
+        <button type="button" id="review-edit-btn" class="outline-btn">Edit</button>
+        <button type="button" id="review-confirm-btn" class="primary-btn">Confirm</button>
+      </div>
+    </div>
   </section>
 
 </main>

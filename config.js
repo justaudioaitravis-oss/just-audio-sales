@@ -46,6 +46,10 @@ const CONFIG = {
   // The "Venue type" dropdown on the New entry screen, in this order.
   VENUE_TYPES: ["Hotel", "Shack", "Restaurant", "Bar", "Pub", "Club", "Home (Stereo)", "Home (Surround)", "Other"],
 
+  // "Type of music" chips on the New entry screen. More than one can be
+  // picked. Saved in the Sheet as e.g. "Background, DJ".
+  MUSIC_TYPES: ["Background", "Live Band", "Duo", "Trio", "DJ"],
+
   // Photo labels — every room gets one slot per label, in this order
   // ("+ Add another room" adds another full set). Always shown and saved
   // in capitals, however they are typed here.
@@ -58,24 +62,14 @@ const CONFIG = {
   TEMPLATES: {
     // First message, sent the moment a New entry is saved. One per type of
     // contact (the chips at the top of New entry).
-    first_visit:
+    first_site_visit:
       "Hi {name}, this is {rep} from {company}.\n\n" +
-      "Good speaking with you at {venue}. As discussed, we can help with {services}. We will put together a quote, and can arrange a free site survey at a time that suits you.\n\n" +
+      "Thank you for your time at {venue} today. As discussed, we can help with {services}. We will put together a quote and send it over shortly.\n\n" +
       "Our brochure: {brochure}",
 
     first_walkin:
       "Hi {name}, this is {rep} from {company}.\n\n" +
       "Thank you for coming in to see us. As discussed, we can help with {services} for {venue}. We will put together a quote, and can arrange a free site survey at a time that suits you.\n\n" +
-      "Our brochure: {brochure}",
-
-    first_inbound:
-      "Hi {name}, this is {rep} from {company}.\n\n" +
-      "Thank you for getting in touch. As discussed, we can help with {services} for {venue}. We will put together a quote, and can arrange a free site survey at a time that suits you.\n\n" +
-      "Our brochure: {brochure}",
-
-    first_site_visit:
-      "Hi {name}, this is {rep} from {company}.\n\n" +
-      "Thank you for having us at {venue} today. We have the measurements and photos we need for {services}, and will send you a quote shortly.\n\n" +
       "Our brochure: {brochure}",
 
     // Reminders, in order (see REMINDER_SCHEDULE_DAYS above).

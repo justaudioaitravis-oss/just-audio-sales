@@ -42,8 +42,8 @@ that gets pre-filled into WhatsApp. A few rules:
 
 There are four kinds of template:
 
-- **First message**, sent the moment a New entry is saved — one per type of
-  contact: `first_visit`, `first_walkin`, `first_inbound`, `first_site_visit`.
+- **First message**, sent the moment a New entry is confirmed — one per type
+  of contact: `first_site_visit`, `first_walkin`.
   `{services}` becomes the enquiries you picked, e.g. "a new sound system
   and acoustic treatment" (the words for each are under `ENQUIRIES`).
 - **Reminders**: `nudge_2day`, `nudge_1week`, `nudge_2week`, `nudge_monthly`.
@@ -68,6 +68,10 @@ Tap a lead in Follow-ups to open its buttons:
 - **Send …** — opens WhatsApp with the reminder that's due. Greyed out until
   its day arrives. **A sent reminder can't be undone.**
 - **Call** — phones the contact.
+- **Edit** — opens the lead's details in the New entry form to correct them
+  (or add photos). Saving updates its Sheet row; it doesn't restart the
+  reminders or send a WhatsApp message. "Cancel edit" at the top leaves it
+  unchanged.
 - **Quoted** — tap once you've sent a quote. The lead switches to quote
   chases, counting from today. If you send a revised quote, tap it again
   (it now says "Requoted") to restart them.
@@ -98,10 +102,10 @@ Quoted. If one goes out late, the next one still waits its full gap.
 
 ---
 
-## 4. New entry: type of contact, sites, venue details
+## 4. New entry
 
-- **Type of contact** — Field visit, Walk-in, Inbound (a call or message)
-  or Site visit. It picks which first message is sent, and is saved in the
+- **Type of contact** — Site visit (you're at the venue) or Walk-in (they
+  came to you). It picks which first message is sent, and is saved in the
   Sheet (`source` = how the lead first came in, `visit_type` = this contact).
 - **Owners with several sites** — each venue is its own lead with its own
   Sheet row and reminders; they share the owner's phone number. Once you
@@ -112,8 +116,28 @@ Quoted. If one goes out late, the next one still waits its full gap.
 - **Venue type** — a dropdown; edit the list under `VENUE_TYPES` in `config.js`.
 - **Venue size** — length, breadth and height in feet. Area fills itself
   in as length × breadth; type over it if the room isn't a rectangle.
-- **Enquiry** — tap as many as apply; at least one is needed. Edit the list
-  under `ENQUIRIES` in `config.js`.
+- **Location** — at the venue, tap **Pin my current location**. The phone's
+  GPS finds the spot (free, works without signal; the first time, the
+  phone asks permission to share location — allow it). It shows the
+  coordinates, how precise they are (e.g. ±8 m, best outdoors), a small map
+  when there's signal, and an "Open in Maps" link. For a walk-in, open the
+  venue in Google Maps, Share → Copy link, and paste it into the box
+  instead. The Sheet gets the coordinates and a Google Maps link.
+- **Enquiry** and **Type of music** — tap as many as apply (at least one
+  enquiry). Edit the lists under `ENQUIRIES` and `MUSIC_TYPES` in `config.js`.
+- **Review** — the button at the bottom shows everything that will be saved.
+  Tap **Edit** to go back and change anything, or **Send to +91 …** to save
+  it and open WhatsApp. Nothing is saved or sent before that.
+
+---
+
+## 4a. Colours and logo
+
+The app uses the Just Audio navy (`#0C4670`, from the company profile) and
+the white logo. The logo is `icons/logo.png` (and the home-screen icons are
+`icons/icon-192.png` and `icon-512.png`) — replace those files to change
+them, keeping the same names. Colours are at the top of `styles.css`, under
+`:root` — change `--brand` to change the navy everywhere.
 
 ---
 
@@ -154,7 +178,9 @@ the new one only to the people who should still have access.
 
 Every room has 6 labelled photo slots: FRONT WALL, LEFT WALL, RIGHT WALL,
 BACK WALL, CEILING, OVERVIEW. Tapping "+ Add another room" adds another set
-for a second room, and so on for as many rooms as needed. All photos are
+for a second room, and so on for as many rooms as needed. Added a room by
+mistake? Tap **Remove room** next to its name (if it already has photos, tap
+twice). All photos are
 optional and never block submission. To change the labels, edit
 `ROOM_LABELS` in `config.js` — they're always shown and saved in capitals.
 
@@ -231,7 +257,7 @@ how to check:
 
 6. **Check the Apps Script is the latest version.** The app only sends
    things once the Apps Script deployment is new enough to understand them
-   (this version of the app needs Apps Script version 5). If the badge stays
+   (this version of the app needs Apps Script version 6). If the badge stays
    on with good signal and nothing new reaches the Sheet, the newest
    `apps-script.gs` probably hasn't been deployed yet. See
    "Shipping an update" below.

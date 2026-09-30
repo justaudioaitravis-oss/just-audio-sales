@@ -2,19 +2,19 @@
 
 Build a lightweight Progressive Web App for field sales lead capture. I am not a developer — explain what you're doing in plain language and don't assume I can debug.
 
-> **STATUS (updated 30 Sep 2026): Built, hardened and deployed; 30 Sep feature round live — see SESSION LOG — 30 SEP.** This file describes the app as it actually is, not just as originally requested — read this before making further changes so nothing gets rebuilt or redeployed unnecessarily. **To pick up where we left off, read SESSION LOG, KNOWN ISSUES and NEXT — EFFICIENCY PLAN at the bottom first.**
+> **STATUS (updated 30 Sep 2026, round 2): Built, hardened and deployed. Round 2 (brand look, review/edit, music, location) is committed — see SESSION LOG — 30 SEP (ROUND 2) for whether it is live yet.** This file describes the app as it actually is, not just as originally requested — read this before making further changes so nothing gets rebuilt or redeployed unnecessarily. **To pick up where we left off, read SESSION LOG, KNOWN ISSUES and NEXT — EFFICIENCY PLAN at the bottom first.**
 >
 > - **Live app:** `https://justaudioaitravis-oss.github.io/just-audio-sales/`
 > - **GitHub repo:** `https://github.com/justaudioaitravis-oss/just-audio-sales` (public repo — GitHub Pages on the free tier requires this, so nothing secret may ever go in it; see PASSCODE LOCK below)
 > - **Google Sheet:** tab named `Leads`, columns match the APPS SCRIPT section below
 > - **Apps Script:** deployed as a Web App, URL pasted into `config.js` → `APPS_SCRIPT_URL`. To ship a script change, edit `apps-script.gs`, paste into the Apps Script editor, then Deploy → Manage deployments → edit → **New version** → Deploy (the live URL does not change, so `config.js` never needs re-editing for a script-only change)
 > - Installed to home screen on the owner's phone, behind a passcode screen checked by the Apps Script (see PASSCODE LOCK)
-> - **Live versions (30 Sep 2026):** app = commit `d02904f` (30 Sep feature round) on GitHub Pages; Apps Script = API version **5** (deployed and confirmed via `?v=1`; `PASSCODE` script property set, 8+ chars); Drive photo folder confirmed private. The owner deleted all Sheet rows on 28 Sep 2026 to start fresh.
+> - **Live versions (30 Sep 2026, before round 2):** app = commit `d02904f` (round 1) on GitHub Pages; Apps Script = API version **5** (deployed and confirmed via `?v=1`; `PASSCODE` script property set, 8+ chars). **Round 2 needs Apps Script version 6 deployed before the app is pushed** — check by opening `APPS_SCRIPT_URL?v=1`, which must say `"v":6`; Drive photo folder confirmed private. The owner deleted all Sheet rows on 28 Sep 2026 to start fresh.
 > - **Shipping any app change:** deploy Apps Script first (if changed), then upload files. No version bump needed — phones pick up changed files automatically (see OFFLINE)
 
 **Stack constraints (strict):** Plain HTML, CSS and vanilla JavaScript. No React, no Vue, no Tailwind, no npm packages, no build step, no bundler. Total payload under 50KB excluding photos. It must open in under one second on a mid-range Android phone on weak wifi.
 
-*(As of 28 Sep 2026 the app files total ~60KB raw / ~18KB compressed — over the 50KB raw target because of plain-English comments. Measured: stripping every comment would save only ~3KB compressed, so it was left readable. Opening is ~50–100ms from the phone's saved copy.)*
+*(As of 30 Sep 2026 round 2: ~95KB raw text files + a 10KB logo. On 28 Sep they were ~60KB raw / ~18KB compressed — over the 50KB raw target because of plain-English comments. Measured: stripping every comment would save only ~3KB compressed, so it was left readable. Opening is ~50–100ms from the phone's saved copy.)*
 
 **Files, exactly these:**
 ```
@@ -24,7 +24,7 @@ styles.css
 config.js
 manifest.json
 sw.js
-icons/ (192px and 512px PNG, generate simple ones)
+icons/ (icon-192.png, icon-512.png — navy with the white wordmark; logo.png — the white wordmark for the logo bar)
 ```
 Plus `apps-script.gs` (Apps Script backend, kept in this same folder for reference — it isn't deployed via GitHub Pages, it's pasted into the Apps Script editor by hand) and `README.md` (end-user instructions).
 
@@ -67,7 +67,9 @@ Each row shows two lines:
 
 Rows are separated by 1px hairlines, not cards.
 
-**Tapping a row opens a panel under it** (one open at a time): an info line (contact · phone · enquiries · venue type · size · quoted date), a full-width green **Send "<message>"** button, and a row of four: **Call** (`tel:` link), **Quoted** ("Requoted" once quoted), **Won**, **Lost**.
+**Tapping a row opens a panel under it** (one open at a time): an info line (contact · phone · enquiries · music · venue type · size · quoted date · **Map** link if a location is saved), a full-width navy **Send "<message>"** button, and a row of five: **Call** (`tel:` link), **Edit**, **Quoted** ("Requoted" once quoted), **Won**, **Lost**. Due rows carry a thin navy bar on their left edge.
+
+- **Edit** opens the lead in the New entry form (heading "Edit lead", a "Cancel edit" link, no site chips). Review → **Save changes** updates the lead on the phone and queues a full `kind: "lead"` upsert of its row (plus any new photos, numbered from Room 1 again in Drive). It does **not** reset reminders, change `visit_date`/`rep`, or open WhatsApp.
 
 - **Send** works only from the due date onward (before that it is greyed out and reads `"1-week nudge · due 5 Oct"`). It opens `https://wa.me/{phone}?text={encoded message}`, advances `reminder_stage`, sets `next_action_date` = today + the next gap and `last_contacted` = today, and moves the row to "Done today" (faded, tick, `"2-day nudge sent"`) until local midnight. **No undo** — owner's decision on 30 Sep (the original brief required undo). Done rows do nothing when tapped. Queued to the Sheet as `kind: "update"` carrying only those three fields.
 - **Quoted** → `status` = `quoted`, `quoted_on` = today, and reminders restart on the quote-chase track from today (`schedule_anchor` = today, stage 0).
@@ -95,11 +97,11 @@ Every New entry for a site resets its track to stage 0, counting from that day. 
 
 **TAB 2 — NEW ENTRY**
 
-Heading: "New entry". Fields top to bottom:
+Heading: "New entry" ("Edit lead" when editing). Fields top to bottom:
 
-1. **Type of contact** — four single-select chips, default "Field visit": Field visit (`visit`) / Walk-in (`walkin`) / Inbound (`inbound`) / Site visit (`site_visit`). Picks the first-message template (`first_<value>`). Saved as `visit_type` (this contact) and, for a new lead, `source` (how it first came in — kept on later contacts).
+1. **Type of contact** — two single-select chips, default **Site visit** (`site_visit`), or **Walk-in** (`walkin`). (Round 1's Field visit / Inbound were removed on 30 Sep at the owner's request; old rows may still say `visit`/`inbound`, and editing such a lead keeps that value unless a chip is tapped.) Picks the first-message template (`first_site_visit` / `first_walkin`). Saved as `visit_type` (this contact) and, for a new lead, `source` (how it first came in — kept on later contacts).
 
-2. **Phone.** Static "+91" prefix, then input. `type="tel"`, `inputmode="numeric"`. Accept exactly 10 digits, allow spaces while typing, strip them on save. Store as `+91XXXXXXXXXX`. Largest text on the screen, ~24px. Reject on submit if not 10 digits, with an inline message — no alert() dialogs anywhere in this app. Below it: the duplicate-check line and the **site chips** (see DUPLICATE CHECK).
+2. **Phone.** Static "+91" prefix, then input. `type="tel"`, `inputmode="numeric"`. Accept exactly 10 digits, allow spaces while typing, strip them on save. Store as `+91XXXXXXXXXX`. Largest text on the screen, ~24px. Reject if not 10 digits, with an inline message — no alert() dialogs anywhere in this app. Below it: the duplicate-check line and the **site chips** (see DUPLICATE CHECK).
 
 3. **Contact name** and **Venue name**, side by side on one row, underline-style inputs.
 
@@ -107,22 +109,34 @@ Heading: "New entry". Fields top to bottom:
 
 5. **Venue size (feet)** — Length, Breadth, Height, Area sq ft: four small numeric inputs, each labelled underneath. Area fills itself in as round(L × B) unless typed by hand. All optional; saved as digits and decimal point only.
 
-6. **Enquiry** — chips from `CONFIG.ENQUIRIES`, **multi-select**, default Sales: Sales / Service / Acoustics / Automation / Rental. Selected chips are dark fill with light text. At least one is required (inline error). Saved as e.g. `"sales, acoustics"`, in config order.
+6. **Location** (free, no API key or account):
+   - **"Pin my current location"** uses the phone's GPS (`navigator.geolocation.watchPosition`, high accuracy). It keeps the most precise fix for up to 15s and stops early once within 20m. It shows `15.587300, 73.744200 · ±8 m · Open in Maps` plus a small **OpenStreetMap embed** (iframe, loaded only when online). GPS works without signal; the first use asks location permission, and a refusal shows an inline hint.
+   - **"…or paste a Google Maps link"** is for walk-ins, where the rep isn't at the site. Coordinates are read from links containing `@lat,lng` or `q=lat,lng`; short `maps.app.goo.gl` links are saved as-is.
+   - Saved as `location` ("lat, lng", 6 decimals), `location_accuracy_m`, and `map_link` (the pasted link, or `https://www.google.com/maps?q=lat,lng`).
+   - Picking a known site pre-fills its location.
 
-7. **Photos** — room-based: every room has 6 slots, `CONFIG.ROOM_LABELS` = **FRONT WALL, LEFT WALL, RIGHT WALL, BACK WALL, CEILING, OVERVIEW**. Labels are upper-cased in code, so they are always capitals on screen, in uploads and in Drive filenames. Shown 3 per row. **"+ Add another room"** appends another full set and can be tapped repeatedly. Each slot opens the camera via `<input type="file" accept="image/*" capture="environment">`. Filled slots show the thumbnail with the label underneath; empty slots show a dashed border. Tapping a filled slot offers retake. All photos optional, never block submission.
+7. **Enquiry** — chips from `CONFIG.ENQUIRIES`, **multi-select**, default Sales: Sales / Service / Acoustics / Automation / Rental (3-per-row grid). Selected chips are navy with white text. At least one is required (inline error). Saved as e.g. `"sales, acoustics"`, in config order.
 
-8. **Note** — one full-width text input, placeholder "Note — zones, music, deadline". Plain text field so the phone keyboard's own dictation works. Do not build a recorder.
+8. **Type of music** — chips from `CONFIG.MUSIC_TYPES`, **multi-select**, optional: Background / Live Band / Duo / Trio / DJ. Saved as `music`, e.g. `"Background, DJ"`, in config order. Picking a known site pre-fills it.
 
-9. **Submit button** — full width, green, pill-shaped, label reads `Send to +91 98765 43210` using the live value of the phone field.
+9. **Photos** — room-based: every room has 6 slots, `CONFIG.ROOM_LABELS` = **FRONT WALL, LEFT WALL, RIGHT WALL, BACK WALL, CEILING, OVERVIEW**. Labels are upper-cased in code, so they are always capitals on screen, in uploads and in Drive filenames. Shown 3 per row.
+   - **"+ Add another room"** appends another full set and can be tapped repeatedly.
+   - When there is more than one room, each has a heading `ROOM n` with a **"Remove room"** link. An empty room goes at once; a room with photos needs a second tap ("Tap again to remove its photos", 4s). The rooms after it renumber.
+   - Each slot opens the camera via `<input type="file" accept="image/*" capture="environment">`. Filled slots show the thumbnail with the label underneath; empty slots show a dashed border. Tapping a filled slot offers retake. All photos optional, never block submission.
 
-**On submit, in this order:**
-1. Validate phone and at least one enquiry. Stop if invalid.
-2. Photos are already compressed (Send is disabled and reads "Preparing photos…" while any is compressing).
-3. Pick the lead: the selected site chip (this phone's lead, or adopt the Sheet row's `lead_id`/`created_at`/`status`/`source`/`quoted_on`), or a new lead for "+ New site" or an unknown number. If the phone and the Sheet disagree on status, the further-along one wins (new < quoted < won/lost); a won/lost site then reopens as `new`.
-4. Reset its reminders: `schedule_anchor` = today, `reminder_stage` = 0, `last_contacted` = today, `next_action_date` = today + the first gap of its track.
-5. Save to the offline queue (row + one item per photo), then send in the background (see OFFLINE).
-6. Open WhatsApp with `first_<type of contact>` straight away (it must open within the tap, or phones block it). `{services}` = the chosen enquiries' phrases from `CONFIG.ENQUIRIES`, joined as "a, b and c".
-7. Reset the form and switch to the Follow-ups tab.
+10. **Note** — one full-width text input, placeholder "Note — zones, music, deadline". Plain text field so the phone keyboard's own dictation works. Do not build a recorder.
+
+11. **Review button** — full width, navy, pill-shaped, reads "Review" ("Review changes" when editing; "Preparing photos…" and disabled while any photo is compressing).
+
+**Review, then confirm (added 30 Sep, round 2 — nothing is saved or sent before Confirm):**
+1. **Review** validates the phone and at least one enquiry, then replaces the form with a **review list** (heading "Check and send" / "Check changes"). It shows: type of contact, phone, site (existing / new, when the number has sites), contact, venue, venue type, size, location, enquiry, music, photos per room, note — empty ones as "—".
+2. **Edit** returns to the form with everything kept. **Send to +91 98765 43210** (new entry) or **Save changes** (edit) confirms.
+3. Confirming a new entry:
+   - **Pick the lead:** the selected site chip (this phone's lead, or adopt the Sheet row's `lead_id`/`created_at`/`status`/`source`/`quoted_on`), or a new lead for "+ New site" or an unknown number. If the phone and the Sheet disagree on status, the further-along one wins (new < quoted < won/lost); a won/lost site then reopens as `new`.
+   - **Reset its reminders:** `schedule_anchor` = today, `reminder_stage` = 0, `last_contacted` = today, `next_action_date` = today + the first gap of its track.
+   - **Save to the offline queue** (row + one item per photo), then send in the background (see OFFLINE).
+   - **Open WhatsApp** with `first_<type of contact>` within the Confirm tap (phones block it otherwise). `{services}` = the chosen enquiries' phrases from `CONFIG.ENQUIRIES`, joined as "a, b and c".
+   - **Reset the form** and switch to the Follow-ups tab.
 
 Never block submission on photos.
 
@@ -172,7 +186,7 @@ On first open (after the passcode screen), show a single full-screen prompt: "Yo
 
 **config.js**
 
-Every value I might change lives here and nowhere else. Comment each one in plain English. Current keys: `APPS_SCRIPT_URL`, `BROCHURE_URL` (one brochure for all services), `COMPANY_NAME`, `REMINDER_SCHEDULE_DAYS`, `MONTHLY_INTERVAL_DAYS`, `QUOTE_SCHEDULE_DAYS`, `ENQUIRIES` (key → phrase used in `{services}`), `VENUE_TYPES`, `ROOM_LABELS`, and `TEMPLATES`: `first_visit`, `first_walkin`, `first_inbound`, `first_site_visit`, `nudge_2day`, `nudge_1week`, `nudge_2week`, `nudge_monthly`, `quote_2day`, `quote_1week`, `quote_2week`, `quote_monthly`, `survey_offer`. Placeholders: `{name} {venue} {brochure} {rep} {company} {services}`. There is no passcode here — it lives in the Apps Script's Script Properties (see PASSCODE LOCK), because this file is public.
+Every value I might change lives here and nowhere else. Comment each one in plain English. Current keys: `APPS_SCRIPT_URL`, `BROCHURE_URL` (one brochure for all services), `COMPANY_NAME`, `REMINDER_SCHEDULE_DAYS`, `MONTHLY_INTERVAL_DAYS`, `QUOTE_SCHEDULE_DAYS`, `ENQUIRIES` (key → phrase used in `{services}`), `VENUE_TYPES`, `ROOM_LABELS`, `MUSIC_TYPES`, `TEMPLATES`: `first_site_visit`, `first_walkin`, `nudge_2day`, `nudge_1week`, `nudge_2week`, `nudge_monthly`, `quote_2day`, `quote_1week`, `quote_2week`, `quote_monthly`, `survey_offer`. Placeholders: `{name} {venue} {brochure} {rep} {company} {services}`. There is no passcode here — it lives in the Apps Script's Script Properties (see PASSCODE LOCK), because this file is public.
 
 All templates should read warm, plain Indian English, no exclamation marks, no emoji, under 60 words each. The first messages promise a quote and offer a free site survey (the site-visit one says the quote is on its way).
 
@@ -184,19 +198,20 @@ All templates should read warm, plain Indian English, no exclamation marks, no e
 
 The complete Google Apps Script lives in `apps-script.gs`:
 
-- `doPost` — append a new row, or update the existing row when `lead_id` is supplied. Accepts `kind: "lead"` (row only), `kind: "photo"` (one photo; skipped if its `photo_id` was already saved; links the venue folder into the row), and the first build's single all-in-one payload (row + `photos` list). Runs under a script lock (`tryLock(30000)`); if the lock can't be had, returns `{ok: false, busy: true}`, which the app treats like a network failure (retry shortly) rather than a refusal. Row lookups (`lead_id`, and `phone` for the duplicate check) read only that one column, not the whole sheet. Requires the passcode (`key`) — see PASSCODE LOCK. Also handles `kind: "verify"` (passcode check) and `kind: "lookup"` (duplicate check). Always returns `{ok: true, v: 5}` or `{ok: false, error}`
+- `doPost` — append a new row, or update the existing row when `lead_id` is supplied. Accepts `kind: "lead"` (row only), `kind: "photo"` (one photo; skipped if its `photo_id` was already saved; links the venue folder into the row), and the first build's single all-in-one payload (row + `photos` list). Runs under a script lock (`tryLock(30000)`); if the lock can't be had, returns `{ok: false, busy: true}`, which the app treats like a network failure (retry shortly) rather than a refusal. Row lookups (`lead_id`, and `phone` for the duplicate check) read only that one column, not the whole sheet. Requires the passcode (`key`) — see PASSCODE LOCK. Also handles `kind: "verify"` (passcode check) and `kind: "lookup"` (duplicate check). Always returns `{ok: true, v: 6}` or `{ok: false, error}`
 - `doPost` `kind: "update"` — Follow-ups Send/Quoted/Won/Lost: writes only the fields present, from the allow-list `reminder_stage`, `next_action_date`, `last_contacted`, `schedule_anchor`, `status`, `quoted_on`, `closed_on` (plus `updated_at`). If the row doesn't exist (deleted by hand), it answers `{ok: true, missing: true}` so the phone stops retrying. This is safe because the app always sends a lead's row before its updates. Unknown `kind` values are refused.
-- `kind: "lookup"` returns `records`: up to 20 rows for that phone, newest first, each with only `lead_id`, `created_at`, `contact_name`, `venue`, `last_contacted`, `status`, `source`, `venue_type`, `length_ft`, `breadth_ft`, `height_ft`, `area_sqft`, `quoted_on` (plus `record` = the newest, for older app copies).
+- `kind: "lookup"` returns `records`: up to 20 rows for that phone, newest first, each with only `lead_id`, `created_at`, `contact_name`, `venue`, `last_contacted`, `status`, `source`, `venue_type`, `length_ft`, `breadth_ft`, `height_ft`, `area_sqft`, `quoted_on`, `music`, `location`, `location_accuracy_m`, `map_link` (plus `record` = the newest, for older app copies).
 - Lead upserts keep the Sheet's existing value for any column the upload leaves out, and stamp `updated_at`. The header row is extended automatically if the Sheet has fewer columns than the script.
-- `doGet ?v=1` — returns `{ok: true, v: 5}` (API version check). `doGet` returns nothing else.
+- `doGet ?v=1` — returns `{ok: true, v: 6}` (API version check). `doGet` returns nothing else. The app needs v6 for leads and lookups, v5 for updates, v4 for the passcode check, v2 for photos.
+- The script **adds columns to the Sheet if it has fewer than it needs** (`insertColumnsAfter`) — a new Google Sheet has only 26 columns (A–Z) and v6 uses 29, so writing column 27+ would otherwise fail with "coordinates of the range are outside the dimensions of the sheet".
 - Photo handling — decode base64, save into a Drive folder named after the venue (inside one root folder, `Just Audio - Lead Photos`), with a subfolder per room (`Room 1`, `Room 2`, ...), each photo filed under its label as the filename (e.g. `FRONT WALL.jpg`); write the venue folder's URL into the row
 - CORS handled correctly for GitHub Pages
 - Return JSON always, never HTML
 
 **Sheet columns, in this exact order:**
-`lead_id` · `created_at` · `rep` · `phone` · `contact_name` · `venue` · `enquiry` · `visit_date` · `note` · `photo_folder` · `reminder_stage` · `schedule_anchor` · `next_action_date` · `last_contacted` · `status` · `source` · `venue_type` · `length_ft` · `breadth_ft` · `height_ft` · `area_sqft` · `visit_type` · `quoted_on` · `closed_on` · `updated_at`
+`lead_id` · `created_at` · `rep` · `phone` · `contact_name` · `venue` · `enquiry` · `visit_date` · `note` · `photo_folder` · `reminder_stage` · `schedule_anchor` · `next_action_date` · `last_contacted` · `status` · `source` · `venue_type` · `length_ft` · `breadth_ft` · `height_ft` · `area_sqft` · `visit_type` · `quoted_on` · `closed_on` · `updated_at` · `music` · `location` · `location_accuracy_m` · `map_link`
 
-The last nine were added in v5, **appended at the end** so the original order is kept. One row per site. `lead_id` is a timestamp-based string. `phone` is always `+91XXXXXXXXXX`. Dates are `YYYY-MM-DD`; `updated_at` is `YYYY-MM-DD HH:mm:ss` (script time zone), set by the script. `enquiry` is a comma-separated list (`sales, service, acoustics, automation, rental`). `reminder_stage` is an integer (0 = nothing sent yet on the current track). `schedule_anchor` is when the current track started. `status` is `new`, `quoted`, `won` or `lost` (set by the Follow-ups buttons, or edited by hand). `source` is how the lead first came in and `visit_type` is the latest contact: `visit`, `walkin`, `inbound` or `site_visit` (old rows may say `qr`).
+29 columns. `venue_type`…`updated_at` were added in v5 and `music`…`map_link` in v6, always **appended at the end** so the original order is kept. `music` is e.g. `Background, DJ`; `location` is `lat, lng`; `location_accuracy_m` is the GPS precision in metres (blank for a pasted link); `map_link` opens the spot in Google Maps. One row per site. `lead_id` is a timestamp-based string. `phone` is always `+91XXXXXXXXXX`. Dates are `YYYY-MM-DD`; `updated_at` is `YYYY-MM-DD HH:mm:ss` (script time zone), set by the script. `enquiry` is a comma-separated list (`sales, service, acoustics, automation, rental`). `reminder_stage` is an integer (0 = nothing sent yet on the current track). `schedule_anchor` is when the current track started. `status` is `new`, `quoted`, `won` or `lost` (set by the Follow-ups buttons, or edited by hand). `source` is how the lead first came in and `visit_type` is the latest contact: `site_visit` or `walkin` (rows from before 30 Sep round 2 may say `visit`, `inbound` or `qr`).
 
 Every cell is written as **plain text** (number format `@`) except `reminder_stage` — otherwise Google Sheets converts values on write (`+91…` → a number, dates → date objects, notes starting `=`/`+` → formulas), which broke the duplicate check. The duplicate lookup also normalises rows written before this fix (numeric phones/lead_ids, Date cells) back to the formats above, matches phones on their last 10 digits, and returns the newest matching row.
 
@@ -204,9 +219,12 @@ Every cell is written as **plain text** (number format `@`) except `reminder_sta
 
 **VISUAL DESIGN**
 
-Restrained and typographic. Background `#FAF8F4`, text `#16150F`, muted `#6A6455`, hairlines `#DFD9CD`, accent `#B84A28`, send button green `#2F6B4F`.
+Minimal and typographic, in the **Just Audio brand** (30 Sep round 2, replacing the original warm palette). Brand navy `#0C4670` was sampled from the cover of `~/Desktop/Just Audio/Just_Audio_Company_Profile_Updated.pdf`. The logo is the white wordmark `~/Desktop/Just Audio/JA LOGO.png` (449×91, transparent), cropped and resized into `icons/logo.png` (52px tall, shown at 26px). Home-screen icons are the wordmark on navy.
 
-Hairline dividers, not cards. No shadows, no gradients, no icons except the tick on done rows and the camera affordance. Generous whitespace. Headings in a serif; everything else in the system font stack for speed. If you use a web font, one weight only, `font-display: swap`, with a real fallback.
+Colours are CSS variables in `styles.css` `:root`: `--brand #0C4670` (logo bar, buttons, selected chips, headings, active nav), `--brand-soft #E7EEF4` (open row, badge), `--bg #F7F9FB`, `--text #0E1A24`, `--muted #5E6B78`, `--hairline #DCE3EA`, `--error #B3261E` (errors, armed Confirm buttons). The manifest and `theme-color` are navy.
+
+- **Logo bar:** a navy bar across the top of the app (respects `safe-area-inset-top`) with the white logo. The passcode and name screens are full navy with the logo, white inputs and a white button.
+- **Type and layout:** hairline dividers, not cards. No gradients; no icons except the tick on done rows, the dropdown ▾ and the camera affordance. Generous whitespace. System font stack everywhere; headings in navy semibold (the serif was dropped to match the brand).
 
 ---
 
@@ -260,6 +278,24 @@ The owner's feature round, plus fixes from the plan below. **Live:** Apps Script
 
   To run: `cd ~/Desktop/jasalesapp-tests && npm i puppeteer-core@23 && node e2e.js`. 10 of 11 runs passed cleanly. One run stopped early and did not happen again — most likely a timing wait in the test itself.
 
+**SESSION LOG — 30 SEP 2026 (ROUND 2)**
+
+The owner's requests, all built and committed. **Not live until the owner deploys Apps Script v6 and the app is pushed** — then update the Live versions line at the top.
+
+- **Brand look:**
+  - Navy `#0C4670` and the white Just Audio wordmark, with a logo bar on every screen.
+  - Navy full-screen passcode and name screens.
+  - New navy home-screen icons; manifest/theme colours set to navy.
+  - Serif headings dropped. Still minimal.
+- **Type of contact:** only Site visit (default) and Walk-in. `first_visit`/`first_inbound` were removed, and `first_site_visit` was rewritten to suit any on-site visit.
+- **Review before saving:** "Review" shows everything; Edit or Send/Save to confirm.
+- **Edit a saved lead** from its Follow-ups panel: no reminder reset, no WhatsApp.
+- **Remove room** link on each room when there are 2+ (a second tap if it has photos).
+- **Type of music** multi-select chips (`MUSIC_TYPES`), saved as `music`.
+- **Location:** free GPS pin with precision, an OpenStreetMap preview and a Google Maps link, or a pasted Maps link for walk-ins. Saved as `location`, `location_accuracy_m`, `map_link`.
+- **Apps Script v6:** 4 new columns, and the Sheet grows past 26 columns automatically.
+- **Tests:** `~/Desktop/jasalesapp-tests/e2e.js` now has 59 checks. It covers the review flow, edit, room removal, music, GPS (simulated), pasted-link parsing, and the 26-column Sheet limit; 3 of 3 runs passed. `shots.js` screenshots the Follow-ups panel, the form, the review screen and the lock screen.
+
 **KNOWN ISSUES (open, not yet fixed)**
 
 1. ~~Stuck "1 waiting" after deleting Sheet rows by hand~~ — fixed 30 Sep (the script answers `missing: true`).
@@ -267,8 +303,10 @@ The owner's feature round, plus fixes from the plan below. **Live:** Apps Script
 3. **Sites known only to the Sheet can arrive after Send.** Each Apps Script call takes 4–10s. Sites on this phone now appear instantly and the lookup starts at the 10th digit, but a site logged only on *another* phone can still be missed if the rep is quick → a second row. See P2.
 4. **Phones don't learn about Sheet changes** (status edited by hand, rows deleted, other reps' leads) except through the site lookup. See P2 — the new `updated_at` column is ready for it.
 5. **localStorage leads have a ceiling** (~380 bytes per lead → ~6,000+ leads on Safari). `saveLeads` is now guarded, so a full storage can't stop a visit being queued; moving leads to IndexedDB is still P4.
-6. **App files over the 50KB raw target** — accepted for readability.
-7. **Old-script retry delay.** If the app is pushed before Apps Script v5 is deployed, entries wait in the queue and only retry every 10 minutes or on app reopen. Harmless, but deploy the script first.
+6. **App files over the 50KB raw target** (~95KB raw after round 2) — accepted for readability; opening is from the phone's saved copy.
+7. **Old-script retry delay.** If the app is pushed before the Apps Script version it needs (now v6) is deployed, entries wait in the queue and only retry every 10 minutes or on app reopen. Harmless, but deploy the script first.
+8. **Edited leads' new photos** go into `Room 1`, `Room 2`… of the venue's Drive folder again (alongside the earlier ones; nothing is overwritten — duplicates are told apart by their `photo_id`).
+9. **Location for walk-ins** depends on the rep pasting a Maps link; short `maps.app.goo.gl` links are saved as a link only (no coordinates), because expanding them needs a network call that Google blocks from the browser.
 
 ---
 

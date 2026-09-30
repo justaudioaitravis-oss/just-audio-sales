@@ -24,6 +24,7 @@ const SHELL_FILES = [
   "app.js",
   "config.js",
   "manifest.json",
+  "icons/logo.png",
   "icons/icon-192.png",
   "icons/icon-512.png"
 ];

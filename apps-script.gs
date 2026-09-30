@@ -9,7 +9,7 @@
  * visit_date | note | photo_folder | reminder_stage | schedule_anchor |
  * next_action_date | last_contacted | status | source | venue_type |
  * length_ft | breadth_ft | height_ft | area_sqft | visit_type | quoted_on |
- * closed_on | updated_at
+ * closed_on | updated_at | music | location | location_accuracy_m | map_link
  *
  * One row per site: an owner with several venues has one row per venue,
  * all with the same phone number.
@@ -23,6 +23,10 @@
  * source          — how the lead first came in: visit, walkin, inbound or
  *                    site_visit. visit_type is the same for the latest contact.
  * updated_at      — when the script last changed the row.
+ * music           — e.g. "Background, DJ".
+ * location        — "latitude, longitude" from the phone's GPS (or read
+ *                    from a pasted Maps link); location_accuracy_m is how
+ *                    precise the GPS fix was; map_link opens it in Google Maps.
  *
  * doPost  — everything the app does: checking the passcode, the
  *           duplicate-number lookup, saving leads, photos and Follow-ups
@@ -50,7 +54,9 @@ const COLUMNS = [
   "schedule_anchor", "next_action_date", "last_contacted", "status", "source",
   // Added in version 5 — always at the end, so existing columns keep their places.
   "venue_type", "length_ft", "breadth_ft", "height_ft", "area_sqft",
-  "visit_type", "quoted_on", "closed_on", "updated_at"
+  "visit_type", "quoted_on", "closed_on", "updated_at",
+  // Added in version 6.
+  "music", "location", "location_accuracy_m", "map_link"
 ];
 
 function getSheet_() {
@@ -58,6 +64,10 @@ function getSheet_() {
   let sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_NAME);
+  }
+  // A new Sheet has 26 columns (A to Z); the app needs more.
+  if (sheet.getMaxColumns() < COLUMNS.length) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), COLUMNS.length - sheet.getMaxColumns());
   }
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(COLUMNS);
@@ -96,8 +106,9 @@ function checkPasscode_(key) {
 // receive a kind of upload it doesn't understand. Version 4 added the
 // passcode check. Version 5 added venue details, several sites per phone
 // number, multiple enquiries, quoted / won / lost, and flexible updates —
-// the app sends leads, updates and lookups only to version 5+.
-const API_VERSION = 5;
+// the app sends leads, updates and lookups only to version 5+. Version 6
+// added music and location — the app sends leads and lookups only to 6+.
+const API_VERSION = 6;
 
 // Every cell is written as plain text except reminder_stage (a number).
 // Without this, Google Sheets "helpfully" converts values as they're
@@ -187,7 +198,8 @@ function doPost(e) {
 // photo folder, or anything else about the lead.
 const LOOKUP_FIELDS = [
   "lead_id", "created_at", "contact_name", "venue", "last_contacted", "status", "source",
-  "venue_type", "length_ft", "breadth_ft", "height_ft", "area_sqft", "quoted_on"
+  "venue_type", "length_ft", "breadth_ft", "height_ft", "area_sqft", "quoted_on",
+  "music", "location", "location_accuracy_m", "map_link"
 ];
 const MAX_SITES = 20;
 

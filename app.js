@@ -9,9 +9,10 @@
 //   4. Rep name prompt (first open only, per phone)
 //   5. Bottom nav tab switching
 //   6. Follow-ups tab: render list (every open lead, with its next contact
-//      date); tap a row for Send / Call / Quoted / Won / Lost
+//      date); tap a row for Send / Call / Edit / Quoted / Won / Lost
 //   7. New Entry tab: type of contact, owner's sites (duplicate check),
-//      venue details, enquiry chips, room-based photos + compression, submit
+//      venue details, location, enquiry + music chips, room-based photos +
+//      compression, review before saving, editing a saved lead
 //   8. Offline queue: every submission is saved on the phone first, then
 //      sent in small pieces, retrying automatically until it gets through
 //   9. Service worker registration
@@ -61,6 +62,12 @@
   function formatDateHuman(dateStr) {
     const [y, m, d] = dateStr.split("-").map(Number);
     return DAY_MONTH.format(new Date(y, m - 1, d));
+  }
+
+  // A Google Maps link for "15.593712, 73.740021" — opens the Maps app on
+  // the phone, free, no account or key needed.
+  function mapsUrl(location) {
+    return `https://www.google.com/maps?q=${encodeURIComponent(location.replace(/\s/g, ""))}`;
   }
 
   function formatPhone(phone) {
@@ -459,11 +466,21 @@
       lead.contact_name,
       formatPhone(lead.phone),
       enquiryNames(lead.enquiry),
+      lead.music,
       lead.venue_type,
       size && `${size} ft`,
       lead.area_sqft && `${lead.area_sqft} sq ft`,
       lead.status === "quoted" && lead.quoted_on && `quoted ${formatDateHuman(lead.quoted_on)}`
     ].filter(Boolean).join(" · ");
+    const mapUrl = lead.map_link || (lead.location && mapsUrl(lead.location));
+    if (mapUrl) {
+      const a = document.createElement("a");
+      a.href = mapUrl;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.textContent = "Map";
+      info.append(" · ", a);
+    }
 
     const { label } = stageInfo(lead);
     const send = document.createElement("button");
@@ -484,7 +501,7 @@
     call.href = `tel:${lead.phone}`;
     call.textContent = "Call";
     actions.appendChild(call);
-    [["quoted", lead.status === "quoted" ? "Requoted" : "Quoted"], ["won", "Won"], ["lost", "Lost"]].forEach(([action, text]) => {
+    [["edit", "Edit"], ["quoted", lead.status === "quoted" ? "Requoted" : "Quoted"], ["won", "Won"], ["lost", "Lost"]].forEach(([action, text]) => {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "row-btn";
@@ -509,6 +526,7 @@
   function handleRowAction(leadId, btn) {
     const action = btn.dataset.action;
     if (action === "send") { sendReminder(leadId); return; }
+    if (action === "edit") { startEdit(leadId); return; }
     if (!btn.classList.contains("armed")) {
       btn.closest(".row-actions").querySelectorAll(".armed").forEach(disarm);
       btn.dataset.text = btn.textContent;
@@ -603,9 +621,22 @@
   const newForm = document.getElementById("new-form");
   const roomsContainerEl = document.getElementById("rooms-container");
   const addRoomBtn = document.getElementById("add-room-btn");
+  const musicChipsEl = document.getElementById("music-chips");
+  const locateBtn = document.getElementById("locate-btn");
+  const locationLine = document.getElementById("location-line");
+  const locationMap = document.getElementById("location-map");
+  const mapLinkInput = document.getElementById("map-link-input");
+  const newHeading = document.getElementById("new-heading");
+  const cancelEditBtn = document.getElementById("cancel-edit-btn");
+  const reviewEl = document.getElementById("review");
+  const reviewListEl = document.getElementById("review-list");
+  const reviewEditBtn = document.getElementById("review-edit-btn");
+  const reviewConfirmBtn = document.getElementById("review-confirm-btn");
 
-  let selectedSource = "visit";
+  let selectedSource = "site_visit";
   const selectedEnquiries = new Set(["sales"]);
+  const selectedMusic = new Set();
+  let editingId = null; // lead_id being edited (Edit in Follow-ups), or null for a new entry
   let photosProcessing = 0; // photos still being compressed; while above 0, Send waits ("Preparing photos…")
 
   // Phone: allow spaces while typing, keep it visually grouped
@@ -628,40 +659,159 @@
       submitBtn.textContent = "Preparing photos…";
       return;
     }
-    const digits = currentPhoneDigits();
-    const shown = digits.length === 10 ? digits.replace(/(\d{5})(\d{5})/, "$1 $2") : "98765 43210";
-    submitBtn.textContent = `Send to +91 ${shown}`;
+    submitBtn.textContent = editingId ? "Review changes" : "Review";
   }
   updateSubmitLabel();
 
-  // Type of contact: Field visit / Walk-in / Inbound / Site visit (one).
+  // Type of contact: Site visit / Walk-in (one). Leads saved by older
+  // versions may say "visit" or "inbound"; editing one keeps that value
+  // unless a chip is tapped.
   const sourceChips = Array.from(document.querySelectorAll("#source-chips .chip"));
   function selectSource(value) {
     selectedSource = value;
     sourceChips.forEach((c) => c.classList.toggle("selected-dark", c.dataset.value === value));
   }
   sourceChips.forEach((c) => c.addEventListener("click", () => selectSource(c.dataset.value)));
-  selectSource("visit");
+  selectSource("site_visit");
 
-  // Enquiry: any number of chips, one per CONFIG.ENQUIRIES.
-  Object.keys(CONFIG.ENQUIRIES).forEach((key) => {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chip";
-    chip.dataset.value = key;
-    chip.textContent = enquiryName(key);
-    chip.addEventListener("click", () => {
-      if (selectedEnquiries.has(key)) selectedEnquiries.delete(key);
-      else selectedEnquiries.add(key);
-      enquiryError.textContent = "";
-      renderEnquiryChips();
+  // A row of chips where any number can be picked. Returns a function that
+  // redraws which ones are selected (after `selected` is changed in code).
+  function multiChips(containerEl, entries, selected, onChange) {
+    entries.forEach(([value, label]) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip";
+      chip.dataset.value = value;
+      chip.textContent = label;
+      chip.addEventListener("click", () => {
+        if (selected.has(value)) selected.delete(value);
+        else selected.add(value);
+        if (onChange) onChange();
+        render();
+      });
+      containerEl.appendChild(chip);
     });
-    enquiryChipsEl.appendChild(chip);
-  });
-  function renderEnquiryChips() {
-    enquiryChipsEl.querySelectorAll(".chip").forEach((c) => c.classList.toggle("selected-dark", selectedEnquiries.has(c.dataset.value)));
+    function render() {
+      containerEl.querySelectorAll(".chip").forEach((c) => c.classList.toggle("selected-dark", selected.has(c.dataset.value)));
+    }
+    render();
+    return render;
   }
-  renderEnquiryChips();
+
+  // Enquiry: one chip per CONFIG.ENQUIRIES. Type of music: one per CONFIG.MUSIC_TYPES.
+  const renderEnquiryChips = multiChips(enquiryChipsEl, Object.keys(CONFIG.ENQUIRIES).map((k) => [k, enquiryName(k)]),
+    selectedEnquiries, () => { enquiryError.textContent = ""; });
+  const renderMusicChips = multiChips(musicChipsEl, CONFIG.MUSIC_TYPES.map((m) => [m, m]), selectedMusic);
+
+  // Saved as e.g. "Background, DJ", in the order of CONFIG.MUSIC_TYPES.
+  function musicValue() {
+    return CONFIG.MUSIC_TYPES.filter((m) => selectedMusic.has(m)).join(", ");
+  }
+
+  // ---- Location ----
+  // "Pin my current location" asks the phone's GPS (free, works without
+  // signal, needs location permission once). It keeps listening for up to
+  // 15 seconds and keeps the most precise fix, stopping early once it is
+  // within 20 m. A walk-in client's site can't be pinned from the shop, so
+  // a Google Maps link can be pasted instead (coordinates are read from it
+  // when the link contains them).
+  let pinned = null; // { lat, lng, acc } or null
+  let watchId = null;
+  const GOOD_ENOUGH_M = 20;
+  const LOCATE_TIMEOUT_MS = 15000;
+
+  function locationText(p) {
+    return `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`;
+  }
+
+  function stopLocating() {
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    locateBtn.disabled = false;
+    locateBtn.textContent = pinned ? "Re-pin my current location" : "Pin my current location";
+  }
+
+  function showPinned() {
+    locationLine.textContent = "";
+    if (!pinned) {
+      locationLine.classList.add("hidden");
+      locationMap.classList.add("hidden");
+      locationMap.removeAttribute("src");
+      return;
+    }
+    const link = document.createElement("a");
+    link.href = mapsUrl(locationText(pinned));
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = "Open in Maps";
+    locationLine.append(`${locationText(pinned)}${pinned.acc ? ` · ±${Math.round(pinned.acc)} m` : ""} · `, link);
+    locationLine.classList.remove("hidden");
+    // A small OpenStreetMap preview (free, no key) — only with signal.
+    if (navigator.onLine !== false) {
+      const d = 0.002;
+      locationMap.src = "https://www.openstreetmap.org/export/embed.html?bbox=" +
+        `${pinned.lng - d},${pinned.lat - d},${pinned.lng + d},${pinned.lat + d}&layer=mapnik&marker=${pinned.lat},${pinned.lng}`;
+      locationMap.classList.remove("hidden");
+    }
+  }
+
+  locateBtn.addEventListener("click", () => {
+    if (!navigator.geolocation) {
+      locationLine.textContent = "This phone can't share its location — paste a Maps link instead.";
+      locationLine.classList.remove("hidden");
+      return;
+    }
+    locateBtn.disabled = true;
+    locateBtn.textContent = "Finding location…";
+    let best = null;
+    const timer = setTimeout(stopLocating, LOCATE_TIMEOUT_MS);
+    watchId = navigator.geolocation.watchPosition((pos) => {
+      const fix = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy };
+      if (!best || fix.acc < best.acc) {
+        best = fix;
+        pinned = fix;
+        showPinned();
+      }
+      if (fix.acc <= GOOD_ENOUGH_M) { clearTimeout(timer); stopLocating(); }
+    }, (err) => {
+      clearTimeout(timer);
+      stopLocating();
+      if (best) return;
+      locationLine.textContent = err.code === 1
+        ? "Location permission is off — allow it for this app in the phone's settings, or paste a Maps link."
+        : "Couldn't get a location — try again outdoors, or paste a Maps link.";
+      locationLine.classList.remove("hidden");
+    }, { enableHighAccuracy: true, maximumAge: 0, timeout: LOCATE_TIMEOUT_MS });
+  });
+
+  // Reads coordinates out of a pasted Maps link, e.g. ".../@15.59,73.74,17z"
+  // or "...?q=15.59,73.74". Short links (maps.app.goo.gl) have none — the
+  // link itself is still saved.
+  function coordsFromLink(link) {
+    const m = link.match(/(?:@|[?&](?:q|ll|query)=)(-?\d{1,2}\.\d+),\s*(-?\d{1,3}\.\d+)/);
+    return m ? { lat: Number(m[1]), lng: Number(m[2]), acc: 0 } : null;
+  }
+
+  // The location fields saved to the Sheet.
+  function locationValues() {
+    const pasted = mapLinkInput.value.trim();
+    const p = pinned || (pasted && coordsFromLink(pasted));
+    return {
+      location: p ? locationText(p) : "",
+      location_accuracy_m: p && p.acc ? String(Math.round(p.acc)) : "",
+      map_link: pasted || (p ? mapsUrl(locationText(p)) : "")
+    };
+  }
+
+  function setLocation(record) {
+    if (watchId !== null) stopLocating();
+    const m = record && String(record.location || "").match(/(-?[\d.]+),\s*(-?[\d.]+)/);
+    pinned = m ? { lat: Number(m[1]), lng: Number(m[2]), acc: Number(record.location_accuracy_m) || 0 } : null;
+    const link = record ? String(record.map_link || "") : "";
+    mapLinkInput.value = link && !(pinned && link === mapsUrl(locationText(pinned))) ? link : "";
+    stopLocating();
+    showPinned();
+  }
 
   CONFIG.VENUE_TYPES.forEach((type) => {
     const option = document.createElement("option");
@@ -723,6 +873,7 @@
   }
 
   function onPhoneChanged() {
+    if (editingId) return; // editing a saved lead: it's already that site
     const digits = currentPhoneDigits();
     if (digits === sitesForDigits) return;
     sitesForDigits = digits;
@@ -802,6 +953,10 @@
     heightInput.value = site ? site.height_ft || "" : "";
     areaInput.value = site ? site.area_sqft || "" : "";
     areaTyped = !!areaInput.value && !(lengthInput.value && breadthInput.value);
+    selectedMusic.clear();
+    if (site && site.music) String(site.music).split(/,\s*/).forEach((m) => selectedMusic.add(m));
+    renderMusicChips();
+    setLocation(site);
   }
 
   // Photos: room-based, each room has one labeled slot per
@@ -834,7 +989,12 @@
       if (rooms.length > 1) {
         const heading = document.createElement("div");
         heading.className = "room-heading";
-        heading.textContent = `ROOM ${roomIndex + 1}`;
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "text-btn";
+        remove.textContent = "Remove room";
+        remove.addEventListener("click", () => removeRoom(room, remove));
+        heading.append(`ROOM ${roomIndex + 1}`, remove);
         block.appendChild(heading);
       }
 
@@ -873,6 +1033,23 @@
       block.appendChild(row);
       roomsContainerEl.appendChild(block);
     });
+  }
+
+  // Removes a room that isn't needed (the rooms after it move up a
+  // number). If it already has photos, the first tap asks to confirm.
+  function removeRoom(room, btn) {
+    if (Object.keys(room.photos).length && !btn.classList.contains("armed")) {
+      btn.classList.add("armed");
+      btn.textContent = "Tap again to remove its photos";
+      setTimeout(() => {
+        if (!btn.isConnected || !btn.classList.contains("armed")) return;
+        btn.classList.remove("armed");
+        btn.textContent = "Remove room";
+      }, 4000);
+      return;
+    }
+    rooms = rooms.filter((r) => r !== room);
+    renderRooms();
   }
 
   addRoomBtn.addEventListener("click", () => {
@@ -961,7 +1138,8 @@
     "lead_id", "created_at", "rep", "phone", "contact_name", "venue", "enquiry",
     "visit_date", "note", "reminder_stage", "schedule_anchor", "next_action_date",
     "last_contacted", "status", "source", "venue_type", "length_ft", "breadth_ft",
-    "height_ft", "area_sqft", "visit_type", "quoted_on", "closed_on"
+    "height_ft", "area_sqft", "visit_type", "quoted_on", "closed_on",
+    "music", "location", "location_accuracy_m", "map_link"
   ];
 
   // new → quoted → won/lost. When the phone and the Sheet disagree about a
@@ -969,10 +1147,31 @@
   // the further-along one is kept.
   const STATUS_RANK = { new: 0, quoted: 1, won: 2, lost: 2 };
 
-  // Submit
+  // Everything a lead's form holds, as the fields saved to the Sheet.
+  function formValues() {
+    return Object.assign({
+      phone: "+91" + currentPhoneDigits(),
+      contact_name: contactNameInput.value.trim(),
+      venue: venueInput.value.trim(),
+      venue_type: venueTypeInput.value,
+      length_ft: cleanNumber(lengthInput.value),
+      breadth_ft: cleanNumber(breadthInput.value),
+      height_ft: cleanNumber(heightInput.value),
+      area_sqft: cleanNumber(areaInput.value),
+      enquiry: Object.keys(CONFIG.ENQUIRIES).filter((k) => selectedEnquiries.has(k)).join(", "),
+      music: musicValue(),
+      visit_type: selectedSource,
+      note: noteInput.value.trim()
+    }, locationValues());
+  }
+
+  const CONTACT_TYPES = { site_visit: "Site visit", walkin: "Walk-in", visit: "Field visit", inbound: "Inbound" };
+
+  // Step 1 — "Review": check the form, then show everything that will be
+  // saved. Nothing is saved or sent until Confirm.
   newForm.addEventListener("submit", (e) => {
     e.preventDefault();
-    if (photosProcessing > 0) return; // a photo is still being prepared — Send is disabled until it's done
+    if (photosProcessing > 0) return; // a photo is still being prepared — Review is disabled until it's done
 
     const digits = currentPhoneDigits();
     if (digits.length !== 10) {
@@ -985,8 +1184,70 @@
       enquiryError.textContent = "Pick at least one enquiry.";
       return;
     }
+    showReview();
+  });
 
-    const fullPhone = "+91" + digits;
+  function showReview() {
+    const v = formValues();
+    const size = [v.length_ft, v.breadth_ft, v.height_ft].filter(Boolean).join(" × ");
+    const photoCounts = rooms.map((r, i) => `Room ${i + 1}: ${Object.keys(r.photos).length}`).join(" · ");
+    const siteId = siteChoice && siteChoice !== "new" ? siteChoice : null;
+    const rows = [
+      ["Type of contact", CONTACT_TYPES[v.visit_type] || v.visit_type],
+      ["Phone", formatPhone(v.phone)],
+      !editingId && sitesFor(currentPhoneDigits()).length > 0 && ["Site", siteId ? "Existing site (updates it)" : "New site"],
+      ["Contact name", v.contact_name],
+      ["Venue", v.venue],
+      ["Venue type", v.venue_type],
+      ["Size", [size && `${size} ft`, v.area_sqft && `${v.area_sqft} sq ft`].filter(Boolean).join(" · ")],
+      ["Location", v.location || (v.map_link ? "Maps link" : "")],
+      ["Enquiry", enquiryNames(v.enquiry)],
+      ["Music", v.music],
+      ["Photos", editingId && !rooms.some((r) => Object.keys(r.photos).length) ? "No new photos" : photoCounts],
+      ["Note", v.note]
+    ].filter(Boolean);
+
+    reviewListEl.textContent = "";
+    rows.forEach(([label, value]) => {
+      const row = document.createElement("div");
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      dd.textContent = value || "—";
+      if (!value) dd.className = "empty";
+      row.append(dt, dd);
+      reviewListEl.appendChild(row);
+    });
+    reviewConfirmBtn.textContent = editingId ? "Save changes" : `Send to ${formatPhone(v.phone)}`;
+    newHeading.textContent = editingId ? "Check changes" : "Check and send";
+    newForm.classList.add("hidden");
+    reviewEl.classList.remove("hidden");
+    window.scrollTo(0, 0);
+  }
+
+  function hideReview() {
+    reviewEl.classList.add("hidden");
+    newForm.classList.remove("hidden");
+    newHeading.textContent = editingId ? "Edit lead" : "New entry";
+  }
+
+  reviewEditBtn.addEventListener("click", () => { hideReview(); window.scrollTo(0, 0); });
+
+  // Step 2 — Confirm: save to the phone and the upload queue (and, for a
+  // new entry, open WhatsApp — it must open within this tap, or phones
+  // block it).
+  reviewConfirmBtn.addEventListener("click", () => {
+    if (editingId) saveEdit();
+    else saveNewEntry();
+  });
+
+  function queueLeadWithPhotos(lead) {
+    const payload = { photos: collectPhotosPayload() };
+    LEAD_FIELDS.forEach((f) => { payload[f] = lead[f] != null ? lead[f] : ""; });
+    queueLead(payload);
+  }
+
+  function saveNewEntry() {
     const today = todayStr();
     const leads = getLeads();
 
@@ -1017,19 +1278,9 @@
     delete lead._doneAt;
     delete lead._doneLabel;
 
+    Object.assign(lead, formValues());
     lead.rep = getRep();
-    lead.phone = fullPhone;
-    lead.contact_name = contactNameInput.value.trim();
-    lead.venue = venueInput.value.trim();
-    lead.venue_type = venueTypeInput.value;
-    lead.length_ft = cleanNumber(lengthInput.value);
-    lead.breadth_ft = cleanNumber(breadthInput.value);
-    lead.height_ft = cleanNumber(heightInput.value);
-    lead.area_sqft = cleanNumber(areaInput.value);
-    lead.enquiry = Object.keys(CONFIG.ENQUIRIES).filter((k) => selectedEnquiries.has(k)).join(", ");
-    lead.visit_type = selectedSource;
     lead.visit_date = today;
-    lead.note = noteInput.value.trim();
 
     // Every contact restarts the reminders, counting from today (a quoted
     // site restarts its quote chases).
@@ -1038,20 +1289,63 @@
     lead.last_contacted = today;
     lead.next_action_date = addDays(today, gapForStage(trackFor(lead), 0));
 
-    const payload = { photos: collectPhotosPayload() };
-    LEAD_FIELDS.forEach((f) => { payload[f] = lead[f] != null ? lead[f] : ""; });
-
     saveLeads(leads);
-    queueLead(payload);
+    queueLeadWithPhotos(lead);
 
-    const template = CONFIG.TEMPLATES["first_" + selectedSource] || CONFIG.TEMPLATES.first_visit;
-    openWhatsApp(fullPhone, fillTemplate(template, messageVars(lead)));
+    const template = CONFIG.TEMPLATES["first_" + selectedSource] || CONFIG.TEMPLATES.first_site_visit;
+    openWhatsApp(lead.phone, fillTemplate(template, messageVars(lead)));
 
+    resetNewForm();
+    switchTab("tab-followups");
+  }
+
+  // ---- Editing a saved lead (Edit in its Follow-ups panel) ----
+  // Opens the lead in this form. Saving changes its details (and adds any
+  // new photos) without restarting its reminders or sending a message.
+
+  function startEdit(leadId) {
+    const lead = getLeads().find((l) => l.lead_id === leadId);
+    if (!lead) return;
+    resetNewForm();
+    editingId = leadId;
+    newHeading.textContent = "Edit lead";
+    cancelEditBtn.classList.remove("hidden");
+    phoneInput.value = lead.phone.slice(3).replace(/(\d{5})(\d{5})/, "$1 $2");
+    contactNameInput.value = lead.contact_name || "";
+    fillFromSite(lead);
+    selectSource(lead.visit_type || lead.source || "site_visit");
+    selectedEnquiries.clear();
+    enquiryKeys(lead.enquiry).forEach((k) => selectedEnquiries.add(k));
+    renderEnquiryChips();
+    noteInput.value = lead.note || "";
+    updateSubmitLabel();
+    switchTab("tab-new");
+    window.scrollTo(0, 0);
+  }
+
+  function saveEdit() {
+    const leads = getLeads();
+    const lead = leads.find((l) => l.lead_id === editingId);
+    if (lead) {
+      Object.assign(lead, formValues());
+      saveLeads(leads);
+      queueLeadWithPhotos(lead);
+    }
+    resetNewForm();
+    switchTab("tab-followups");
+  }
+
+  cancelEditBtn.addEventListener("click", () => {
     resetNewForm();
     switchTab("tab-followups");
   });
 
   function resetNewForm() {
+    editingId = null;
+    newHeading.textContent = "New entry";
+    cancelEditBtn.classList.add("hidden");
+    reviewEl.classList.add("hidden");
+    newForm.classList.remove("hidden");
     phoneInput.value = "";
     contactNameInput.value = "";
     noteInput.value = "";
@@ -1063,7 +1357,7 @@
     onPhoneChanged();
     resetRooms();
     updateSubmitLabel();
-    selectSource("visit");
+    selectSource("site_visit");
     selectedEnquiries.clear();
     selectedEnquiries.add("sales");
     renderEnquiryChips();
@@ -1238,7 +1532,7 @@
   // size, quoted/closed), so it waits in the queue until the new script is
   // deployed. The version is remembered on the phone (every answer from
   // the script carries it), so this usually costs no extra call.
-  const MIN_SERVER_VERSION = { lead: 5, photo: 2, update: 5, verify: 4, lookup: 5 };
+  const MIN_SERVER_VERSION = { lead: 6, photo: 2, update: 5, verify: 4, lookup: 6 };
   let serverVersion = Number(localStorage.getItem(STORE_KEYS.serverVersion)) || 0;
   function rememberServerVersion(v) {
     serverVersion = v;
